@@ -10,10 +10,12 @@ import (
 	"time"
 
 	"github.com/framed-app/api/internal/enrichment"
+	"github.com/framed-app/api/internal/handlers"
 	"github.com/framed-app/api/internal/jobs"
 	"github.com/framed-app/api/internal/scraper"
 	"github.com/framed-app/api/pkg/config"
 	"github.com/framed-app/api/pkg/db"
+	"github.com/gofiber/fiber/v2"
 	"github.com/hibiken/asynq"
 )
 
@@ -73,10 +75,20 @@ func main() {
 	}()
 
 	// ── HTTP Server ───────────────────────────────────────────────────────────
-	// TODO: initialise Fiber, register routes
-	_ = pool
-	_ = asynqClient
+	app := fiber.New()
+	h := handlers.New(pool, asynqClient)
+
+	// Register Routes
+	app.Post(
+		"/onboard", h.Onboard,
+	)
+
+	app.Get(
+		"/status/:jobId", h.Status,
+	)
+
 	addr := fmt.Sprintf(":%s", cfg.APIPort)
+	go app.Listen(addr)
 	log.Printf("API listening on %s", addr)
 
 	// ── Graceful Shutdown ─────────────────────────────────────────────────────

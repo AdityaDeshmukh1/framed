@@ -35,7 +35,7 @@ func (w *Workers) Register(mux *asynq.ServeMux) {
 }
 
 // handleScrapeProfile scrapes a user's Letterboxd profile and
-// enqueues an EnrichFilm job for each film found.
+// enqueues an EnrichFilm Simjob for each film found.
 func (w *Workers) handleScrapeProfile(ctx context.Context, t *asynq.Task) error {
 	// deserialise the payload
 	var payload models.ScrapeProfilePayload
