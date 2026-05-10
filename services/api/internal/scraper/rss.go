@@ -62,13 +62,29 @@ func (r *RSSImporter) ImportProfile(ctx context.Context, handle string) ([]RawRa
 
 	var ratings []RawRating
 	for _, item := range feed.Items {
+		var rating *float32
+		if item.MemberRating > 0 {
+			v := item.MemberRating
+			rating = &v
+		}
+
+		var watchedDate *time.Time
+		if item.WatchedDate != "" {
+			t, err := time.Parse("2006-01-02", item.WatchedDate)
+			if err == nil {
+				watchedDate = &t
+			}
+		}
+
 		ratings = append(ratings, RawRating{
+			TMDBMovieID:    item.TMDBMovieID,
 			Title:          item.FilmTitle,
 			Year:           item.FilmYear,
-			Rating:         item.MemberRating,
+			Rating:         rating,
 			Liked:          item.MemberLike == "Yes",
 			Rewatch:        item.Rewatch == "Yes",
 			LetterboxdSlug: item.LetterboxdSlug,
+			WatchedDate:    watchedDate,
 		})
 	}
 	return ratings, nil

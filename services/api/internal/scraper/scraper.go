@@ -16,10 +16,11 @@ import (
 // RawRating is what we extract from Letterboxd before TMDB enrichment.
 // It's intentionally minimal — just what the HTML gives us.
 type RawRating struct {
+	TMDBMovieID    int
 	LetterboxdSlug string
 	Title          string
 	Year           int
-	Rating         float32 // 0 if not rated (just logged)
+	Rating         *float32 // NULLF if not rated (just logged)
 	Liked          bool
 	WatchedDate    *time.Time
 	Rewatch        bool
@@ -231,7 +232,8 @@ func parseFilmNode(n *html.Node) (RawRating, bool) {
 	// rating: stored as integer 1-10 (half-stars), divide by 2
 	if ratingStr := getAttr(n, "data-owner-rating"); ratingStr != "" {
 		if ratingInt, err := strconv.Atoi(ratingStr); err == nil && ratingInt > 0 {
-			r.Rating = float32(ratingInt) / 2.0
+			v := float32(ratingInt) / 2.0
+			r.Rating = &v
 		}
 	}
 

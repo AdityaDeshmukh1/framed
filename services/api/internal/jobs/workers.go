@@ -5,11 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 
 	"github.com/framed-app/api/internal/enrichment"
 	"github.com/framed-app/api/internal/scraper"
+	"github.com/framed-app/api/pkg/db"
 	"github.com/framed-app/api/pkg/models"
 	"github.com/hibiken/asynq"
+	"github.com/jackc/pgx/v5"
 )
 
 // Workers holds all dependencies the job handlers need.
@@ -18,12 +21,14 @@ import (
 type Workers struct {
 	scraper  scraper.ProfileImporter
 	enricher *enrichment.TMDBClient
+	pool     *db.Pool
 }
 
-func NewWorkers(scraper scraper.ProfileImporter, enricher *enrichment.TMDBClient) *Workers {
+func NewWorkers(scraper scraper.ProfileImporter, enricher *enrichment.TMDBClient, pool *db.Pool) *Workers {
 	return &Workers{
 		scraper:  scraper,
 		enricher: enricher,
+		pool:     pool,
 	}
 }
 
@@ -54,7 +59,57 @@ func (w *Workers) handleScrapeProfile(ctx context.Context, t *asynq.Task) error 
 
 	log.Printf("[scrape] found %d films for user=%s", len(ratings), payload.UserID)
 
-	// TODO: store ratings in user_ratings table
+	for _, r := range ratings {
+		var ratingStr string
+		if r.Rating != nil {
+			ratingStr = fmt.Sprintf("%.1f", *r.Rating)
+		} else {
+			ratingStr = "unrated"
+		}
+		log.Printf("[scrape] film=%s year=%d rating=%s rewatch=%v liked=%v slug=%s",
+			r.Title, r.Year, ratingStr, r.Rewatch, r.Liked, r.LetterboxdSlug)
+
+		// extract slug from URL: https://letterboxd.com/user/film/slug/ -> slug
+		parts := strings.Split(strings.TrimSuffix(r.LetterboxdSlug, "/"), "/")
+		slug := parts[len(parts)-1]
+
+		// Write or Fetch film from the films table
+		var filmID string
+		err = w.pool.QueryRow(ctx,
+			`INSERT INTO films (tmdb_id, letterboxd_slug, title, year)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (tmdb_id) DO NOTHING
+RETURNING id`,
+			r.TMDBMovieID, slug, r.Title, r.Year).Scan(&filmID)
+
+		if err == pgx.ErrNoRows {
+			err = w.pool.QueryRow(ctx,
+				`SELECT id FROM films 
+			WHERE tmdb_id = $1`,
+				r.TMDBMovieID).Scan(&filmID)
+			if err != nil {
+				return fmt.Errorf("fetch film id: %w", err)
+			}
+		} else if err != nil {
+			return fmt.Errorf("upsert film: %w", err)
+		}
+
+		// store ratings in user_ratings table
+		var ratingID string
+		err = w.pool.QueryRow(ctx,
+			`INSERT INTO user_ratings (film_id, rating, watched_date, rewatch, liked)
+VALUES ($1, $2, $3, $4, $5)
+     ON CONFLICT DO NOTHING
+     RETURNING id`,
+			filmID, r.Rating, r.WatchedDate, r.Rewatch, r.Liked,
+		).Scan(&ratingID)
+		if err != nil && err != pgx.ErrNoRows {
+			return fmt.Errorf("insert rating: %w", err)
+		}
+		log.Printf("[scrape] processed film=%s filmID=%s", r.Title, filmID)
+	}
+	log.Printf("[scrape] completed all films for user=%s", payload.UserID)
+
 	// TODO: enqueue EnrichFilm job for each unseen film
 	// TODO: enqueue ComputeVector job when enrichment completes
 
