@@ -14,14 +14,14 @@ type RSSImporter struct {
 
 type rssItem struct {
 	Title          string  `xml:"title"`
-	WatchedDate    string  `xml:"watchedDate"`
-	Rewatch        string  `xml:"rewatch"`
-	FilmTitle      string  `xml:"filmTitle"`
-	FilmYear       int     `xml:"filmYear"`
-	MemberRating   float32 `xml:"memberRating"`
-	TMDBMovieID    int     `xml:"movieId"`
-	MemberLike     string  `xml:"memberLike"`
 	LetterboxdSlug string  `xml:"link"`
+	WatchedDate    string  `xml:"https://letterboxd.com watchedDate"`
+	Rewatch        string  `xml:"https://letterboxd.com rewatch"`
+	FilmTitle      string  `xml:"https://letterboxd.com filmTitle"`
+	FilmYear       int     `xml:"https://letterboxd.com filmYear"`
+	MemberRating   float32 `xml:"https://letterboxd.com memberRating"`
+	MemberLike     string  `xml:"https://letterboxd.com memberLike"`
+	TMDBMovieID    int     `xml:"https://themoviedb.org movieId"`
 }
 
 type rssFeed struct {
