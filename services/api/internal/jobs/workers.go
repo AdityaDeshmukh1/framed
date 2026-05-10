@@ -16,11 +16,11 @@ import (
 // This is dependency injection — handlers get what they need
 // through this struct, not through global variables.
 type Workers struct {
-	scraper  *scraper.Scraper
+	scraper  scraper.ProfileImporter
 	enricher *enrichment.TMDBClient
 }
 
-func NewWorkers(scraper *scraper.Scraper, enricher *enrichment.TMDBClient) *Workers {
+func NewWorkers(scraper scraper.ProfileImporter, enricher *enrichment.TMDBClient) *Workers {
 	return &Workers{
 		scraper:  scraper,
 		enricher: enricher,
@@ -47,11 +47,7 @@ func (w *Workers) handleScrapeProfile(ctx context.Context, t *asynq.Task) error 
 		payload.UserID, payload.LetterboxdHandle)
 
 	// scrape letterboxd
-	ratings, err := w.scraper.ScrapeProfile(ctx, payload.LetterboxdHandle,
-		func(found, processed int) {
-			log.Printf("[scrape] user=%s processed=%d", payload.UserID, processed)
-		},
-	)
+	ratings, err := w.scraper.ImportProfile(ctx, payload.LetterboxdHandle)
 	if err != nil {
 		return fmt.Errorf("scrape profile: %w", err)
 	}

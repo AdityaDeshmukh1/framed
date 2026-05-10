@@ -48,7 +48,7 @@ func main() {
 	defer asynqClient.Close()
 
 	// ── Services ──────────────────────────────────────────────────────────────
-	scraperSvc := scraper.New(cfg.ScraperRequestDelayMS, cfg.ScraperMaxConcurrent)
+	scraperSvc := scraper.NewRSSImporter()
 	enricherSvc := enrichment.New(cfg.TMDBApiKey)
 
 	// ── Workers ───────────────────────────────────────────────────────────────
