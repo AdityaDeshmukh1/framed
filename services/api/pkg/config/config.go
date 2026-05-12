@@ -46,7 +46,7 @@ func Load() (*Config, error) {
 
 	cfg := &Config{
 		Env:             getEnv("APP_ENV", "development"),
-		APIPort:         getEnv("API_PORT", "8080"),
+		APIPort:         getEnv("API_PORT", "8081"),
 		DatabaseURL:     mustGetEnv("DATABASE_URL"),
 		RedisURL:        mustGetEnv("REDIS_URL"),
 		TMDBApiKey:      mustGetEnv("TMDB_API_KEY"),

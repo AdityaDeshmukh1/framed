@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"time"
 
 	"github.com/framed-app/api/internal/enrichment"
 	"github.com/framed-app/api/internal/scraper"
@@ -92,6 +93,34 @@ RETURNING id`,
 			}
 		} else if err != nil {
 			return fmt.Errorf("upsert film: %w", err)
+		}
+
+		var filmData *enrichment.FilmData
+		for attempt := 0; attempt < 3; attempt++ {
+			filmData, err = w.enricher.GetFilmDetails(ctx, r.TMDBMovieID)
+			if err == nil {
+				break
+			}
+			log.Printf("[scrape] enrich attempt %d failed for film=%s err=%v", attempt+1, r.Title, err)
+			time.Sleep(500 * time.Millisecond)
+		}
+		if err != nil {
+			log.Printf("[scrape] failed to enrich film=%s err=%v", r.Title, err)
+			// don't return — enrichment failure shouldn't block rating storage
+		} else {
+			_, err = w.pool.Exec(ctx,
+				`UPDATE films 
+         SET synopsis = $1, directors = $2, genres = $3, poster_path = $4
+         WHERE id = $5`,
+				filmData.Synopsis,
+				filmData.Directors,
+				filmData.Genres,
+				filmData.PosterPath,
+				filmID,
+			)
+			if err != nil {
+				log.Printf("[scrape] failed to update film=%s err=%v", r.Title, err)
+			}
 		}
 
 		// store ratings in user_ratings table
