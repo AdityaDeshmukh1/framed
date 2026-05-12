@@ -12,7 +12,7 @@ import (
 
 type User struct {
 	ID                 uuid.UUID  `db:"id"                  json:"id"`
-	Email              string     `db:"email"               json:"-"`        // never exposed in API responses
+	Email              string     `db:"email"               json:"-"` // never exposed in API responses
 	Age                int        `db:"age"                 json:"age"`
 	LocationCity       string     `db:"location_city"       json:"locationCity"`
 	LocationCountry    string     `db:"location_country"    json:"locationCountry"`
@@ -74,10 +74,10 @@ type UserRating struct {
 	ID          uuid.UUID  `db:"id"           json:"id"`
 	UserID      uuid.UUID  `db:"user_id"      json:"userId"`
 	FilmID      uuid.UUID  `db:"film_id"      json:"filmId"`
-	Rating      float32    `db:"rating"       json:"rating"`     // 0.5 to 5.0
+	Rating      float32    `db:"rating"       json:"rating"` // 0.5 to 5.0
 	WatchedDate *time.Time `db:"watched_date" json:"watchedDate"`
 	Rewatch     bool       `db:"rewatch"      json:"rewatch"`
-	Liked       bool       `db:"liked"        json:"liked"`       // letterboxd heart
+	Liked       bool       `db:"liked"        json:"liked"` // letterboxd heart
 	CreatedAt   time.Time  `db:"created_at"   json:"createdAt"`
 }
 
@@ -88,18 +88,18 @@ type UserRating struct {
 // ─────────────────────────────────────────────────────────────────────────────
 
 type TasteVector struct {
-	ID              uuid.UUID `db:"id"               json:"id"`
-	UserID          uuid.UUID `db:"user_id"          json:"userId"`
+	ID     uuid.UUID `db:"id"               json:"id"`
+	UserID uuid.UUID `db:"user_id"          json:"userId"`
 	// Vector itself stored in postgres as vector(256)
 	// We pass it as []float32 in Go
-	TopGenres       []string  `db:"top_genres"       json:"topGenres"`
-	TopDirectors    []string  `db:"top_directors"    json:"topDirectors"`
-	TopDecades      []int     `db:"top_decades"      json:"topDecades"`
-	AvgRating       float64   `db:"avg_rating"       json:"avgRating"`
-	RatingVariance  float64   `db:"rating_variance"  json:"ratingVariance"`
-	ObscurityScore  float64   `db:"obscurity_score"  json:"obscurityScore"`   // 0-1
-	TotalFilms      int       `db:"total_films"      json:"totalFilms"`
-	ComputedAt      time.Time `db:"computed_at"      json:"computedAt"`
+	TopGenres      []string  `db:"top_genres"       json:"topGenres"`
+	TopDirectors   []string  `db:"top_directors"    json:"topDirectors"`
+	TopDecades     []int     `db:"top_decades"      json:"topDecades"`
+	AvgRating      float64   `db:"avg_rating"       json:"avgRating"`
+	RatingVariance float64   `db:"rating_variance"  json:"ratingVariance"`
+	ObscurityScore float64   `db:"obscurity_score"  json:"obscurityScore"` // 0-1
+	TotalFilms     int       `db:"total_films"      json:"totalFilms"`
+	ComputedAt     time.Time `db:"computed_at"      json:"computedAt"`
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -108,14 +108,14 @@ type TasteVector struct {
 // ─────────────────────────────────────────────────────────────────────────────
 
 type SoulPortrait struct {
-	ID                      uuid.UUID  `db:"id"                         json:"id"`
-	UserID                  uuid.UUID  `db:"user_id"                    json:"userId"`
-	PortraitText            string     `db:"portrait_text"              json:"portraitText"`
-	SummaryLine             string     `db:"summary_line"               json:"summaryLine"`
-	UnseenRecommendations   []string   `db:"unseen_recommendations"     json:"unseenRecommendations"`
-	UserAccuracyRating      *string    `db:"user_accuracy_rating"       json:"userAccuracyRating"`
-	UserAccuracyNote        *string    `db:"user_accuracy_note"         json:"userAccuracyNote"`
-	ComputedAt              time.Time  `db:"computed_at"                json:"computedAt"`
+	ID                    uuid.UUID `db:"id"                         json:"id"`
+	UserID                uuid.UUID `db:"user_id"                    json:"userId"`
+	PortraitText          string    `db:"portrait_text"              json:"portraitText"`
+	SummaryLine           string    `db:"summary_line"               json:"summaryLine"`
+	UnseenRecommendations []string  `db:"unseen_recommendations"     json:"unseenRecommendations"`
+	UserAccuracyRating    *string   `db:"user_accuracy_rating"       json:"userAccuracyRating"`
+	UserAccuracyNote      *string   `db:"user_accuracy_note"         json:"userAccuracyNote"`
+	ComputedAt            time.Time `db:"computed_at"                json:"computedAt"`
 	// Snapshot of the vector at generation time
 	// Used to detect drift and decide if regeneration is needed
 	// Not exposed in API — internal bookkeeping only
@@ -126,17 +126,17 @@ type SoulPortrait struct {
 // ─────────────────────────────────────────────────────────────────────────────
 
 type Match struct {
-	ID               uuid.UUID  `db:"id"                 json:"id"`
-	UserA            uuid.UUID  `db:"user_a"             json:"userA"`
-	UserB            uuid.UUID  `db:"user_b"             json:"userB"`
-	Score            float64    `db:"score"              json:"score"`
-	WhyText          *string    `db:"why_text"           json:"whyText"`
-	FirstDateFilmID  *uuid.UUID `db:"first_date_film_id" json:"firstDateFilmId"`
-	Status           MatchStatus `db:"status"            json:"status"`
-	UserAAction      *string    `db:"user_a_action"      json:"userAAction"`
-	UserBAction      *string    `db:"user_b_action"      json:"userBAction"`
-	MatchedAt        *time.Time `db:"matched_at"         json:"matchedAt"`
-	CreatedAt        time.Time  `db:"created_at"         json:"createdAt"`
+	ID              uuid.UUID   `db:"id"                 json:"id"`
+	UserA           uuid.UUID   `db:"user_a"             json:"userA"`
+	UserB           uuid.UUID   `db:"user_b"             json:"userB"`
+	Score           float64     `db:"score"              json:"score"`
+	WhyText         *string     `db:"why_text"           json:"whyText"`
+	FirstDateFilmID *uuid.UUID  `db:"first_date_film_id" json:"firstDateFilmId"`
+	Status          MatchStatus `db:"status"            json:"status"`
+	UserAAction     *string     `db:"user_a_action"      json:"userAAction"`
+	UserBAction     *string     `db:"user_b_action"      json:"userBAction"`
+	MatchedAt       *time.Time  `db:"matched_at"         json:"matchedAt"`
+	CreatedAt       time.Time   `db:"created_at"         json:"createdAt"`
 }
 
 type MatchStatus string
@@ -181,11 +181,11 @@ type Message struct {
 type JobType string
 
 const (
-	JobTypeScrapeProfile    JobType = "scrape:profile"
-	JobTypeEnrichFilm       JobType = "enrich:film"
-	JobTypeComputeVector    JobType = "vector:compute"
-	JobTypeGenerateSoul     JobType = "soul:generate"
-	JobTypeGenerateBlurbs   JobType = "blurbs:generate"
+	JobTypeScrapeProfile  JobType = "scrape:profile"
+	JobTypeEnrichFilm     JobType = "enrich:film"
+	JobTypeComputeVector  JobType = "vector:compute"
+	JobTypeGenerateSoul   JobType = "soul:generate"
+	JobTypeGenerateBlurbs JobType = "blurbs:generate"
 )
 
 // ScrapeProfilePayload is the data passed to the scrape worker.
@@ -196,6 +196,7 @@ type ScrapeProfilePayload struct {
 
 // EnrichFilmPayload is the data passed to the TMDB enrichment worker.
 type EnrichFilmPayload struct {
+	TMDBMovieID    int    `json:"tmdbMovieId"`
 	FilmID         string `json:"filmId"`
 	LetterboxdSlug string `json:"letterboxdSlug"`
 }

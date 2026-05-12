@@ -20,16 +20,18 @@ import (
 // This is dependency injection — handlers get what they need
 // through this struct, not through global variables.
 type Workers struct {
-	scraper  scraper.ProfileImporter
-	enricher *enrichment.TMDBClient
-	pool     *db.Pool
+	scraper     scraper.ProfileImporter
+	asynqClient *asynq.Client
+	enricher    *enrichment.TMDBClient
+	pool        *db.Pool
 }
 
-func NewWorkers(scraper scraper.ProfileImporter, enricher *enrichment.TMDBClient, pool *db.Pool) *Workers {
+func NewWorkers(scraper scraper.ProfileImporter, enricher *enrichment.TMDBClient, pool *db.Pool, asynqClient *asynq.Client) *Workers {
 	return &Workers{
-		scraper:  scraper,
-		enricher: enricher,
-		pool:     pool,
+		scraper:     scraper,
+		enricher:    enricher,
+		pool:        pool,
+		asynqClient: asynqClient,
 	}
 }
 
@@ -38,6 +40,7 @@ func NewWorkers(scraper scraper.ProfileImporter, enricher *enrichment.TMDBClient
 func (w *Workers) Register(mux *asynq.ServeMux) {
 	mux.HandleFunc(string(models.JobTypeScrapeProfile), w.handleScrapeProfile)
 	mux.HandleFunc(string(models.JobTypeComputeVector), w.handleComputeVector)
+	mux.HandleFunc(string(models.JobTypeEnrichFilm), w.handleEnrichFilm)
 }
 
 // handleScrapeProfile scrapes a user's Letterboxd profile and
@@ -95,31 +98,12 @@ RETURNING id`,
 			return fmt.Errorf("upsert film: %w", err)
 		}
 
-		var filmData *enrichment.FilmData
-		for attempt := 0; attempt < 3; attempt++ {
-			filmData, err = w.enricher.GetFilmDetails(ctx, r.TMDBMovieID)
-			if err == nil {
-				break
-			}
-			log.Printf("[scrape] enrich attempt %d failed for film=%s err=%v", attempt+1, r.Title, err)
-			time.Sleep(500 * time.Millisecond)
-		}
+		enrichTask, err := NewEnrichFilmTask(filmID, r.TMDBMovieID, slug)
 		if err != nil {
-			log.Printf("[scrape] failed to enrich film=%s err=%v", r.Title, err)
-			// don't return — enrichment failure shouldn't block rating storage
+			log.Printf("[scrape] failed to create enrich task for film=%s err=%v", r.Title, err)
 		} else {
-			_, err = w.pool.Exec(ctx,
-				`UPDATE films 
-         SET synopsis = $1, directors = $2, genres = $3, poster_path = $4
-         WHERE id = $5`,
-				filmData.Synopsis,
-				filmData.Directors,
-				filmData.Genres,
-				filmData.PosterPath,
-				filmID,
-			)
-			if err != nil {
-				log.Printf("[scrape] failed to update film=%s err=%v", r.Title, err)
+			if _, err = w.asynqClient.Enqueue(enrichTask); err != nil {
+				log.Printf("[scrape] failed to enqueue enrich task for film=%s err=%v", r.Title, err)
 			}
 		}
 
@@ -142,6 +126,47 @@ VALUES ($1, $2, $3, $4, $5)
 	// TODO: enqueue EnrichFilm job for each unseen film
 	// TODO: enqueue ComputeVector job when enrichment completes
 
+	return nil
+}
+
+func (w *Workers) handleEnrichFilm(ctx context.Context, t *asynq.Task) error {
+	var payload models.EnrichFilmPayload
+	if err := json.Unmarshal(t.Payload(), &payload); err != nil {
+		return fmt.Errorf("unmarshal payload: %w", err)
+	}
+
+	log.Printf("[enrich] enriching film=%s tmdbID=%d", payload.FilmID, payload.TMDBMovieID)
+
+	// retry up to 3 times — ISP resets are intermittent
+	var filmData *enrichment.FilmData
+	var err error
+	for attempt := 0; attempt < 3; attempt++ {
+		filmData, err = w.enricher.GetFilmDetails(ctx, payload.TMDBMovieID)
+		if err == nil {
+			break
+		}
+		log.Printf("[enrich] attempt %d failed for tmdbID=%d err=%v", attempt+1, payload.TMDBMovieID, err)
+		time.Sleep(500 * time.Millisecond)
+	}
+	if err != nil {
+		return fmt.Errorf("enrich film %s: %w", payload.FilmID, err)
+	}
+
+	_, err = w.pool.Exec(ctx,
+		`UPDATE films 
+         SET synopsis = $1, directors = $2, genres = $3, poster_path = $4
+         WHERE id = $5`,
+		filmData.Synopsis,
+		filmData.Directors,
+		filmData.Genres,
+		filmData.PosterPath,
+		payload.FilmID,
+	)
+	if err != nil {
+		return fmt.Errorf("update film %s: %w", payload.FilmID, err)
+	}
+
+	log.Printf("[enrich] completed film=%s", payload.FilmID)
 	return nil
 }
 
