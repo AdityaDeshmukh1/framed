@@ -1,4 +1,4 @@
-.PHONY: dev build test clean
+.PHONY: dev build test clean db-flush
 
 # ── local dev ──────────────────────────────────────────────────────────────────
 dev:
@@ -29,6 +29,10 @@ db-rollback:
 
 db-reset:
 	cd services/api && go run cmd/migrate/main.go reset
+
+db-flush:
+	redis-cli FLUSHALL
+	psql postgres://postgres:postgres@localhost:5432/frame -c "TRUNCATE films, user_ratings, scrape_jobs CASCADE;"
 
 # ── test ───────────────────────────────────────────────────────────────────────
 test-api:

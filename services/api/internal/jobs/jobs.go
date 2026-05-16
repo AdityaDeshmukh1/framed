@@ -49,3 +49,16 @@ func NewEnrichFilmTask(filmID string, tmdbID int, slug string) (*asynq.Task, err
 
 	return asynq.NewTask(string(models.JobTypeEnrichFilm), bytes), nil
 }
+
+func NewEmbedFilmTask(filmdId string) (*asynq.Task, error) {
+	payload := models.EmbedFilmPayload{
+		FilmID: filmdId,
+	}
+
+	bytes, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("marshal payload: %w", err)
+	}
+
+	return asynq.NewTask(string(models.JobTypeEmbedFilm), bytes), nil
+}

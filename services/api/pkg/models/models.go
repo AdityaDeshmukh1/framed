@@ -186,6 +186,7 @@ const (
 	JobTypeComputeVector  JobType = "vector:compute"
 	JobTypeGenerateSoul   JobType = "soul:generate"
 	JobTypeGenerateBlurbs JobType = "blurbs:generate"
+	JobTypeEmbedFilm      JobType = "film:embed"
 )
 
 // ScrapeProfilePayload is the data passed to the scrape worker.
@@ -216,4 +217,9 @@ type GenerateBlurbsPayload struct {
 	UserID string `json:"userId"`
 	// Top N match candidates to generate blurbs for
 	CandidateIDs []string `json:"candidateIds"`
+}
+
+// EmbedFilmPayload triggers embedding computation for a single film.
+type EmbedFilmPayload struct {
+	FilmID string `json:"filmId"`
 }
