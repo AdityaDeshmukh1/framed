@@ -152,14 +152,17 @@ func (w *Workers) handleEnrichFilm(ctx context.Context, t *asynq.Task) error {
 		return fmt.Errorf("enrich film %s: %w", payload.FilmID, err)
 	}
 
+	log.Printf("[enrich] film=%s keywords=%v", payload.FilmID, filmData.Keywords)
+
 	_, err = w.pool.Exec(ctx,
 		`UPDATE films 
-         SET synopsis = $1, directors = $2, genres = $3, poster_path = $4
-         WHERE id = $5`,
+         SET synopsis = $1, directors = $2, genres = $3, poster_path = $4, themes = $5
+         WHERE id = $6`,
 		filmData.Synopsis,
 		filmData.Directors,
 		filmData.Genres,
 		filmData.PosterPath,
+		filmData.Keywords,
 		payload.FilmID,
 	)
 	if err != nil {
