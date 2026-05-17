@@ -76,7 +76,7 @@ func main() {
 
 	// ── HTTP Server ───────────────────────────────────────────────────────────
 	app := fiber.New()
-	h := handlers.New(pool, asynqClient)
+	h := handlers.New(pool, asynqClient, cfg.AnthropicApiKey)
 
 	// Register Routes
 	app.Post(
@@ -89,6 +89,10 @@ func main() {
 
 	app.Post(
 		"/match", h.Match,
+	)
+
+	app.Post(
+		"/soul/:user_id", h.Soul,
 	)
 
 	addr := fmt.Sprintf(":%s", cfg.APIPort)

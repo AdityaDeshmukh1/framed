@@ -14,9 +14,10 @@ import (
 )
 
 type Handlers struct {
-	pool        *db.Pool
-	asynqClient *asynq.Client
-	matcher     *matching.Matcher
+	pool         *db.Pool
+	asynqClient  *asynq.Client
+	matcher      *matching.Matcher
+	anthropicKey string
 }
 
 
@@ -39,11 +40,12 @@ type StatusResponse struct {
 	CompletedAt    *time.Time `json:"completed_at"`
 }
 
-func New(pool *db.Pool, asynqClient *asynq.Client) *Handlers {
+func New(pool *db.Pool, asynqClient *asynq.Client, anthropicKey string) *Handlers {
 	return &Handlers{
-		pool:        pool,
-		asynqClient: asynqClient,
-		matcher:     matching.New(pool),
+		pool:         pool,
+		asynqClient:  asynqClient,
+		matcher:      matching.New(pool),
+		anthropicKey: anthropicKey,
 	}
 }
 
