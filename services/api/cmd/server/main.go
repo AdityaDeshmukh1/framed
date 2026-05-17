@@ -52,7 +52,7 @@ func main() {
 	enricherSvc := enrichment.New(cfg.TMDBApiKey)
 
 	// ── Workers ───────────────────────────────────────────────────────────────
-	workers := jobs.NewWorkers(scraperSvc, enricherSvc, pool, asynqClient)
+	workers := jobs.NewWorkers(scraperSvc, enricherSvc, pool, asynqClient, cfg.AnthropicApiKey)
 
 	asynqServer := asynq.NewServer(redisOpt, asynq.Config{
 		Concurrency:    10,

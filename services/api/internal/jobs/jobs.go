@@ -62,3 +62,17 @@ func NewEmbedFilmTask(filmdId string) (*asynq.Task, error) {
 
 	return asynq.NewTask(string(models.JobTypeEmbedFilm), bytes), nil
 }
+
+func NewGenerateBlurbsTask(userID string, candidateIDs []string) (*asynq.Task, error) {
+	payload := models.GenerateBlurbsPayload{
+		UserID:       userID,
+		CandidateIDs: candidateIDs,
+	}
+
+	bytes, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("marshal payload: %w", err)
+	}
+
+	return asynq.NewTask(string(models.JobTypeGenerateBlurbs), bytes), nil
+}

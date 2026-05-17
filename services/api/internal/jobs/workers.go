@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/framed-app/api/internal/enrichment"
+	"github.com/framed-app/api/internal/llm"
 	"github.com/framed-app/api/internal/scraper"
 	"github.com/framed-app/api/pkg/db"
 	"github.com/framed-app/api/pkg/models"
@@ -24,18 +25,20 @@ import (
 // This is dependency injection — handlers get what they need
 // through this struct, not through global variables.
 type Workers struct {
-	scraper     scraper.ProfileImporter
-	asynqClient *asynq.Client
-	enricher    *enrichment.TMDBClient
-	pool        *db.Pool
+	scraper      scraper.ProfileImporter
+	asynqClient  *asynq.Client
+	enricher     *enrichment.TMDBClient
+	pool         *db.Pool
+	anthropicKey string
 }
 
-func NewWorkers(scraper scraper.ProfileImporter, enricher *enrichment.TMDBClient, pool *db.Pool, asynqClient *asynq.Client) *Workers {
+func NewWorkers(scraper scraper.ProfileImporter, enricher *enrichment.TMDBClient, pool *db.Pool, asynqClient *asynq.Client, anthropicKey string) *Workers {
 	return &Workers{
-		scraper:     scraper,
-		enricher:    enricher,
-		pool:        pool,
-		asynqClient: asynqClient,
+		scraper:      scraper,
+		enricher:     enricher,
+		pool:         pool,
+		asynqClient:  asynqClient,
+		anthropicKey: anthropicKey,
 	}
 }
 
@@ -54,7 +57,7 @@ func (w *Workers) Register(mux *asynq.ServeMux) {
 	mux.HandleFunc(string(models.JobTypeComputeVector), w.handleComputeVector)
 	mux.HandleFunc(string(models.JobTypeEnrichFilm), w.handleEnrichFilm)
 	mux.HandleFunc(string(models.JobTypeEmbedFilm), w.handleEmbedFilm)
-
+	mux.HandleFunc(string(models.JobTypeGenerateBlurbs), w.handleGenerateBlurbs)
 }
 
 // handleScrapeProfile scrapes a user's Letterboxd profile and
@@ -227,7 +230,7 @@ func (w *Workers) handleComputeVector(ctx context.Context, t *asynq.Task) error 
 	log.Printf("[vector] computing taste vector for user=%s", payload.UserID)
 
 	rows, err := w.pool.Query(ctx,
-		`SELECT ur.rating, f.embedding::text
+		`SELECT ur.rating, f.embedding::text, f.genres, f.directors
 		 FROM user_ratings ur
 		 JOIN films f ON f.id = ur.film_id
 		 WHERE ur.user_id = $1 AND f.embedding IS NOT NULL`,
@@ -240,6 +243,8 @@ func (w *Workers) handleComputeVector(ctx context.Context, t *asynq.Task) error 
 	type entry struct {
 		rating    *float64
 		embedding []float32
+		genres    []string
+		directors []string
 	}
 
 	var entries []entry
@@ -249,14 +254,15 @@ func (w *Workers) handleComputeVector(ctx context.Context, t *asynq.Task) error 
 	for rows.Next() {
 		var rating *float64
 		var embStr string
-		if err := rows.Scan(&rating, &embStr); err != nil {
+		var genres, directors []string
+		if err := rows.Scan(&rating, &embStr, &genres, &directors); err != nil {
 			return fmt.Errorf("scan row: %w", err)
 		}
 		emb, err := parseVector(embStr)
 		if err != nil {
 			return fmt.Errorf("parse embedding: %w", err)
 		}
-		entries = append(entries, entry{rating: rating, embedding: emb})
+		entries = append(entries, entry{rating: rating, embedding: emb, genres: genres, directors: directors})
 		if rating != nil {
 			ratingSum += *rating
 			ratedCount++
@@ -312,17 +318,128 @@ func (w *Workers) handleComputeVector(ctx context.Context, t *asynq.Task) error 
 	}
 	vecStr := "[" + strings.Join(parts, ",") + "]"
 
+	// Score genres and directors: weight = max(0, rating − avg) + 1 so every
+	// film contributes a base count and highly-rated films contribute more.
+	genreScores := map[string]float64{}
+	directorScores := map[string]float64{}
+	for i, e := range entries {
+		w := 1.0
+		if e.rating != nil {
+			w += math.Max(0, *e.rating-avgRating)
+		}
+		for _, g := range e.genres {
+			genreScores[g] += w
+		}
+		for _, d := range e.directors {
+			directorScores[d] += w
+		}
+		_ = i
+	}
+	topGenres := topN(genreScores, 5)
+	topDirectors := topN(directorScores, 5)
+
 	_, err = w.pool.Exec(ctx,
-		`INSERT INTO taste_vectors (user_id, vector)
-		 VALUES ($1, $2::vector)
-		 ON CONFLICT (user_id) DO UPDATE SET vector = EXCLUDED.vector, computed_at = now()`,
-		payload.UserID, vecStr)
+		`INSERT INTO taste_vectors (user_id, vector, top_genres, top_directors)
+		 VALUES ($1, $2::vector, $3, $4)
+		 ON CONFLICT (user_id) DO UPDATE
+		   SET vector        = EXCLUDED.vector,
+		       top_genres    = EXCLUDED.top_genres,
+		       top_directors = EXCLUDED.top_directors,
+		       computed_at   = now()`,
+		payload.UserID, vecStr, topGenres, topDirectors)
 	if err != nil {
 		return fmt.Errorf("upsert taste vector for user=%s: %w", payload.UserID, err)
 	}
 
-	log.Printf("[vector] completed user=%s", payload.UserID)
+	log.Printf("[vector] completed user=%s genres=%v directors=%v", payload.UserID, topGenres, topDirectors)
 	return nil
+}
+
+// topN returns the top n keys from a score map, sorted descending.
+func topN(scores map[string]float64, n int) []string {
+	type kv struct {
+		key   string
+		score float64
+	}
+	ranked := make([]kv, 0, len(scores))
+	for k, v := range scores {
+		ranked = append(ranked, kv{k, v})
+	}
+	// simple insertion sort — maps are small (< 50 genres)
+	for i := 1; i < len(ranked); i++ {
+		for j := i; j > 0 && ranked[j].score > ranked[j-1].score; j-- {
+			ranked[j], ranked[j-1] = ranked[j-1], ranked[j]
+		}
+	}
+	if n > len(ranked) {
+		n = len(ranked)
+	}
+	out := make([]string, n)
+	for i := range out {
+		out[i] = ranked[i].key
+	}
+	return out
+}
+
+// handleGenerateBlurbs generates "why you'd click" copy for each match pair
+// using Claude Haiku and stores the result in matches.why_text.
+func (w *Workers) handleGenerateBlurbs(ctx context.Context, t *asynq.Task) error {
+	var payload models.GenerateBlurbsPayload
+	if err := json.Unmarshal(t.Payload(), &payload); err != nil {
+		return fmt.Errorf("unmarshal payload: %w", err)
+	}
+
+	log.Printf("[blurbs] generating for user=%s candidates=%d", payload.UserID, len(payload.CandidateIDs))
+
+	// Fetch taste snapshot for the requesting user.
+	snapshotA, err := w.fetchTasteSnapshot(ctx, payload.UserID)
+	if err != nil {
+		return fmt.Errorf("fetch snapshot for user=%s: %w", payload.UserID, err)
+	}
+
+	for _, candidateID := range payload.CandidateIDs {
+		snapshotB, err := w.fetchTasteSnapshot(ctx, candidateID)
+		if err != nil {
+			log.Printf("[blurbs] skip candidate=%s err=%v", candidateID, err)
+			continue
+		}
+
+		blurb, err := llm.GenerateBlurb(ctx, w.anthropicKey, snapshotA, snapshotB)
+		if err != nil {
+			log.Printf("[blurbs] generation failed for pair (%s, %s) err=%v", payload.UserID, candidateID, err)
+			continue
+		}
+
+		// Canonical ordering matches the unique constraint on matches(user_a, user_b).
+		userA, userB := payload.UserID, candidateID
+		if userA > userB {
+			userA, userB = userB, userA
+		}
+
+		if _, err = w.pool.Exec(ctx,
+			`UPDATE matches SET why_text = $1 WHERE user_a = $2 AND user_b = $3`,
+			blurb, userA, userB); err != nil {
+			log.Printf("[blurbs] failed to store blurb for pair (%s, %s) err=%v", userA, userB, err)
+		}
+	}
+
+	log.Printf("[blurbs] completed user=%s", payload.UserID)
+	return nil
+}
+
+// fetchTasteSnapshot loads top_genres, top_directors, and the portrait summary line for a user.
+func (w *Workers) fetchTasteSnapshot(ctx context.Context, userID string) (llm.TasteSnapshot, error) {
+	var snap llm.TasteSnapshot
+	if err := w.pool.QueryRow(ctx,
+		`SELECT top_genres, top_directors FROM taste_vectors WHERE user_id = $1`,
+		userID).Scan(&snap.TopGenres, &snap.TopDirectors); err != nil {
+		return snap, err
+	}
+	// Portrait summary line is optional — ignore if not generated yet.
+	_ = w.pool.QueryRow(ctx,
+		`SELECT summary_line FROM soul_portraits WHERE user_id = $1`,
+		userID).Scan(&snap.SummaryLine)
+	return snap, nil
 }
 
 func parseVector(s string) ([]float32, error) {

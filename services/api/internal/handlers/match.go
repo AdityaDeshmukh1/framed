@@ -3,6 +3,7 @@ package handlers
 import (
 	"log"
 
+	"github.com/framed-app/api/internal/jobs"
 	"github.com/gofiber/fiber/v2"
 )
 
@@ -31,6 +32,23 @@ func (h *Handlers) Match(c *fiber.Ctx) error {
 	}
 
 	log.Printf("[match] found %d matches for user=%s", len(matches), req.UserID)
+
+	// Enqueue blurb generation for all matched candidates in the background.
+	if len(matches) > 0 {
+		candidateIDs := make([]string, len(matches))
+		for i, m := range matches {
+			if m.UserA == req.UserID {
+				candidateIDs[i] = m.UserB
+			} else {
+				candidateIDs[i] = m.UserA
+			}
+		}
+		if task, err := jobs.NewGenerateBlurbsTask(req.UserID, candidateIDs); err == nil {
+			if _, err = h.asynqClient.Enqueue(task); err != nil {
+				log.Printf("[match] failed to enqueue blurbs for user=%s err=%v", req.UserID, err)
+			}
+		}
+	}
 
 	return c.Status(fiber.StatusOK).JSON(fiber.Map{
 		"matches": matches,
