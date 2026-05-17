@@ -87,6 +87,10 @@ func main() {
 		"/status/:jobId", h.Status,
 	)
 
+	app.Post(
+		"/match", h.Match,
+	)
+
 	addr := fmt.Sprintf(":%s", cfg.APIPort)
 	go app.Listen(addr)
 	log.Printf("API listening on %s", addr)

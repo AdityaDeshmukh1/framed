@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/framed-app/api/internal/jobs"
+	"github.com/framed-app/api/internal/matching"
 	"github.com/framed-app/api/pkg/db"
 	"github.com/jackc/pgx/v5"
 
@@ -15,7 +16,9 @@ import (
 type Handlers struct {
 	pool        *db.Pool
 	asynqClient *asynq.Client
+	matcher     *matching.Matcher
 }
+
 
 type OnboardRequest struct {
 	LetterboxdHandle string `json:"letterboxd_handle"`
@@ -39,8 +42,9 @@ type StatusResponse struct {
 func New(pool *db.Pool, asynqClient *asynq.Client) *Handlers {
 	return &Handlers{
 		pool:        pool,
-		asynqClient: asynqClient}
-
+		asynqClient: asynqClient,
+		matcher:     matching.New(pool),
+	}
 }
 
 func (h *Handlers) Onboard(c *fiber.Ctx) error {
