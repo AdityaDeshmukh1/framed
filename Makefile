@@ -32,7 +32,12 @@ db-reset:
 
 db-flush:
 	redis-cli FLUSHALL
-	psql postgres://postgres:postgres@localhost:5432/frame -c "TRUNCATE films, user_ratings, scrape_jobs CASCADE;"
+	psql postgres://postgres:postgres@localhost:5432/frame -c "TRUNCATE users, films CASCADE;"
+	psql postgres://postgres:postgres@localhost:5432/frame -c "\
+		INSERT INTO users (id, email, age) VALUES \
+		  ('00000000-0000-0000-0000-000000000001', 'test1@framed.dev', 25), \
+		  ('00000000-0000-0000-0000-000000000002', 'test2@framed.dev', 25) \
+		ON CONFLICT DO NOTHING;"
 
 # ── test ───────────────────────────────────────────────────────────────────────
 test-api:

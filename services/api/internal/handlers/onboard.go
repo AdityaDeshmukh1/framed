@@ -19,6 +19,7 @@ type Handlers struct {
 
 type OnboardRequest struct {
 	LetterboxdHandle string `json:"letterboxd_handle"`
+	UserID           string `json:"user_id"`
 }
 
 type OnboardResponse struct {
@@ -54,8 +55,8 @@ func (h *Handlers) Onboard(c *fiber.Ctx) error {
 	// and to correlate with the Asynq task in the worker
 	var jobID string
 	err := h.pool.QueryRow(c.Context(),
-		`INSERT INTO scrape_jobs (letterboxd_handle, status) VALUES ($1, 'queued') RETURNING id`,
-		req.LetterboxdHandle,
+		`INSERT INTO scrape_jobs (user_id, letterboxd_handle, status) VALUES ($1, $2, 'queued') RETURNING id`,
+		req.UserID, req.LetterboxdHandle,
 	).Scan(&jobID)
 	if err != nil {
 		log.Printf("failed to insert scrape job: %v", err)
@@ -65,7 +66,7 @@ func (h *Handlers) Onboard(c *fiber.Ctx) error {
 	}
 
 	// Enqueue the Asynq task with the DB job ID so the worker can update the same row
-	task, err := jobs.NewScrapeProfileTask(jobID, req.LetterboxdHandle)
+	task, err := jobs.NewScrapeProfileTask(req.UserID, req.LetterboxdHandle)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "failed to create task",

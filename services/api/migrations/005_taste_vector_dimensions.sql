@@ -1,0 +1,1 @@
+ALTER TABLE taste_vectors ALTER COLUMN vector TYPE vector(384);
