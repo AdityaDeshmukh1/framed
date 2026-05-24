@@ -1,7 +1,7 @@
 /**
  * Profile page — the user's own Cinematic Soul card.
- * Shows soul portrait, opening titles, stats, film-anchored prompts,
- * "now showing", and intentions. Server component using mock data.
+ * Fetches the real soul portrait from GET /soul/:user_id; falls back to mock if unavailable.
+ * User stats (age, location, watchlist counts) remain mock until a /profile endpoint is added.
  */
 
 import { PhoneShell } from '../../components/layout/PhoneShell'
@@ -10,7 +10,8 @@ import { BottomNav } from '../../components/layout/BottomNav'
 import { SoulPortrait } from '../../components/features/SoulPortrait'
 import { PosterGrid } from '../../components/features/PosterGrid'
 import { RuleDouble, RuleThin, DiamondDivider } from '../../components/ui/Dividers'
-import { MOCK_USER, MOCK_SOUL_PORTRAIT, POSTER_COLOR_SEQUENCE } from '../../lib/constants'
+import { MOCK_USER, MOCK_SOUL_PORTRAIT, MOCK_USER_ID, POSTER_COLOR_SEQUENCE } from '../../lib/constants'
+import { API_BASE_URL } from '../../lib/constants'
 
 /** A single stat cell in the 2×4 stats grid */
 function StatCell({ label, value }: { label: string; value: string | number }) {
@@ -40,9 +41,23 @@ function EditIcon() {
   )
 }
 
-export default function ProfilePage() {
+export default async function ProfilePage() {
   const user = MOCK_USER
-  const portrait = MOCK_SOUL_PORTRAIT
+
+  // Fetch real soul portrait from backend; fall back to mock if unavailable.
+  let portraitText = MOCK_SOUL_PORTRAIT.portrait
+  try {
+    const res = await fetch(`${API_BASE_URL}/soul/${MOCK_USER_ID}`, { cache: 'no-store' })
+    if (res.ok) {
+      const data = await res.json()
+      if (data.portrait) portraitText = data.portrait
+      console.log('[framed:profile] loaded real soul portrait')
+    }
+  } catch {
+    console.log('[framed:profile] backend unavailable — using mock portrait')
+  }
+
+  const portrait = { portrait: portraitText, director_note: MOCK_SOUL_PORTRAIT.director_note }
 
   // Build opening titles list with colours cycling through the palette
   const openingTitles = user.prompts?.map((p, i) => ({

@@ -71,8 +71,8 @@ func (h *Handlers) Onboard(c *fiber.Ctx) error {
 		})
 	}
 
-	// Enqueue the Asynq task with the DB job ID so the worker can update the same row
-	task, err := jobs.NewScrapeProfileTask(req.UserID, req.LetterboxdHandle)
+	// Enqueue the Asynq task with the DB job ID so the worker can update the exact row
+	task, err := jobs.NewScrapeProfileTask(jobID, req.UserID, req.LetterboxdHandle)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "failed to create task",

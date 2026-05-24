@@ -1,29 +1,27 @@
 'use client'
 
 /**
- * useSoul — fetches or generates the soul portrait for a given user.
- * Polls the status endpoint then fetches the portrait once complete.
+ * useSoul — fetches an existing soul portrait for a user via GET /api/soul/[userId].
+ * Uses TanStack Query for caching (portrait is stable, 30-min stale time).
  */
 
 import { useQuery } from '@tanstack/react-query'
-import { fetchSoulPortrait } from '../lib/api'
+import { fetchSoul } from '../lib/api'
 import { MOCK_USER_ID } from '../lib/constants'
-import type { SoulPortrait } from '../lib/types'
+import type { SoulPortraitResponse } from '../lib/types'
 
 interface UseSoulResult {
-  /** The soul portrait data, or null while loading */
-  soul: SoulPortrait | null
-  /** Whether the query is in its initial loading state */
+  soul: SoulPortraitResponse | null
   isLoading: boolean
-  /** Any error that occurred */
   error: Error | null
 }
 
 export function useSoul(userId: string = MOCK_USER_ID): UseSoulResult {
   const { data, isLoading, error } = useQuery({
     queryKey: ['soul', userId],
-    queryFn: () => fetchSoulPortrait(userId),
-    staleTime: 30 * 60 * 1000, // 30 minutes — portrait is stable
+    queryFn: () => fetchSoul(userId),
+    staleTime: 30 * 60 * 1000,
+    retry: false, // 404 (not yet generated) should not retry
   })
 
   return {

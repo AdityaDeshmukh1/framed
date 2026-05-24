@@ -8,8 +8,9 @@ import (
 	"github.com/hibiken/asynq"
 )
 
-func NewScrapeProfileTask(userID, handle string) (*asynq.Task, error) {
+func NewScrapeProfileTask(jobID, userID, handle string) (*asynq.Task, error) {
 	payload := models.ScrapeProfilePayload{
+		JobID:            jobID,
 		UserID:           userID,
 		LetterboxdHandle: handle,
 	}

@@ -22,23 +22,23 @@ import (
 )
 
 // Workers holds all dependencies the job handlers need.
-// This is dependency injection — handlers get what they need
-// through this struct, not through global variables.
 type Workers struct {
 	scraper      scraper.ProfileImporter
 	asynqClient  *asynq.Client
 	enricher     *enrichment.TMDBClient
 	pool         *db.Pool
 	anthropicKey string
+	mlServiceURL string
 }
 
-func NewWorkers(scraper scraper.ProfileImporter, enricher *enrichment.TMDBClient, pool *db.Pool, asynqClient *asynq.Client, anthropicKey string) *Workers {
+func NewWorkers(scraper scraper.ProfileImporter, enricher *enrichment.TMDBClient, pool *db.Pool, asynqClient *asynq.Client, anthropicKey, mlServiceURL string) *Workers {
 	return &Workers{
 		scraper:      scraper,
 		enricher:     enricher,
 		pool:         pool,
 		asynqClient:  asynqClient,
 		anthropicKey: anthropicKey,
+		mlServiceURL: mlServiceURL,
 	}
 }
 
@@ -69,8 +69,15 @@ func (w *Workers) handleScrapeProfile(ctx context.Context, t *asynq.Task) error 
 		return fmt.Errorf("unmarshal payload: %w", err)
 	}
 
-	log.Printf("[scrape] starting profile scrape for user=%s handle=%s",
-		payload.UserID, payload.LetterboxdHandle)
+	log.Printf("[scrape] starting profile scrape for user=%s handle=%s job=%s",
+		payload.UserID, payload.LetterboxdHandle, payload.JobID)
+
+	// Mark as scraping immediately so the UI transitions out of 'queued'
+	if _, err := w.pool.Exec(ctx,
+		`UPDATE scrape_jobs SET status = 'scraping', started_at = now() WHERE id = $1`,
+		payload.JobID); err != nil {
+		log.Printf("[scrape] failed to update job status to scraping: %v", err)
+	}
 
 	// scrape letterboxd
 	ratings, err := w.scraper.ImportProfile(ctx, payload.LetterboxdHandle)
@@ -80,10 +87,11 @@ func (w *Workers) handleScrapeProfile(ctx context.Context, t *asynq.Task) error 
 
 	log.Printf("[scrape] found %d films for user=%s", len(ratings), payload.UserID)
 
-	if _, err = w.pool.Exec(ctx,
-		`UPDATE scrape_jobs SET status = 'scraping', films_found = $1, started_at = now() WHERE letterboxd_handle = $2`,
-		len(ratings), payload.LetterboxdHandle); err != nil {
-		log.Printf("[scrape] failed to update job status to scraping: %v", err)
+	// Update films_found count now that we know the total
+	if _, err := w.pool.Exec(ctx,
+		`UPDATE scrape_jobs SET films_found = $1 WHERE id = $2`,
+		len(ratings), payload.JobID); err != nil {
+		log.Printf("[scrape] failed to update films_found: %v", err)
 	}
 
 	for _, r := range ratings {
@@ -152,8 +160,8 @@ VALUES ($1, $2, $3, $4, $5, $6)
 	log.Printf("[scrape] completed all films for user=%s", payload.UserID)
 
 	if _, err = w.pool.Exec(ctx,
-		`UPDATE scrape_jobs SET status = 'complete', films_processed = $1, completed_at = now() WHERE letterboxd_handle = $2`,
-		len(ratings), payload.LetterboxdHandle); err != nil {
+		`UPDATE scrape_jobs SET status = 'complete', films_processed = $1, completed_at = now() WHERE id = $2`,
+		len(ratings), payload.JobID); err != nil {
 		log.Printf("[scrape] failed to update job status to complete: %v", err)
 	}
 
@@ -482,7 +490,7 @@ func (w *Workers) handleEmbedFilm(ctx context.Context, t *asynq.Task) error {
 		strings.Join(themes, " ") + ". " +
 		synopsis
 
-	endpoint := "http://localhost:8000/embed"
+	endpoint := w.mlServiceURL + "/embed"
 
 	body, err := json.Marshal(embedRequest{Text: embeddingText})
 	if err != nil {

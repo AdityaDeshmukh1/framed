@@ -191,6 +191,7 @@ const (
 
 // ScrapeProfilePayload is the data passed to the scrape worker.
 type ScrapeProfilePayload struct {
+	JobID            string `json:"jobId"`
 	UserID           string `json:"userId"`
 	LetterboxdHandle string `json:"letterboxdHandle"`
 }

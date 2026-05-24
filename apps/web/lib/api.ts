@@ -1,53 +1,109 @@
 /**
  * Typed fetch wrappers for all Framed API routes.
- * All functions call internal /api/* routes which proxy to the Go backend.
+ * Client-side calls go through /api/* proxy routes (avoids CORS).
+ * Server-side calls use API_BASE_URL directly.
+ *
+ * Log format: [framed:<scope>] → METHOD /path  |  ✓ ... → 200  |  ✗ ... → 4xx
  */
 
-import type { ScrapeJob, Match, SoulPortrait } from './types'
+import type { ScrapeJob, MatchListItem, MatchDetail, SoulPortraitResponse } from './types'
 
-/** Base fetch wrapper with JSON serialization */
-async function apiFetch<T>(
-  path: string,
-  options?: RequestInit
-): Promise<T> {
+function log(scope: string, msg: string, data?: unknown) {
+  if (data !== undefined) console.log(`[framed:${scope}]`, msg, data)
+  else console.log(`[framed:${scope}]`, msg)
+}
+
+async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
+  const method = options?.method ?? 'GET'
+  log('api', `→ ${method} ${path}`)
+
   const res = await fetch(path, {
     headers: { 'Content-Type': 'application/json' },
     ...options,
   })
 
   if (!res.ok) {
-    const text = await res.text().catch(() => 'Unknown error')
-    throw new Error(`API error ${res.status}: ${text}`)
+    const text = await res.text().catch(() => 'unknown error')
+    log('api', `✗ ${method} ${path} → ${res.status}`, text)
+    throw new Error(`API ${res.status}: ${text}`)
   }
 
+  log('api', `✓ ${method} ${path} → ${res.status}`)
   return res.json() as Promise<T>
 }
 
-/** Start the onboarding pipeline for a Letterboxd handle */
-export async function startOnboarding(
-  userId: string,
-  letterboxdHandle: string
-): Promise<{ job_id: string }> {
-  return apiFetch('/api/onboard', {
+// ── Onboarding ───────────────────────────────────────────────────────────────
+
+export async function startOnboarding(userId: string, letterboxdHandle: string) {
+  log('onboard', `starting pipeline  user=${userId}  handle=@${letterboxdHandle}`)
+  const result = await apiFetch<{ job_id: string; status: string }>('/api/onboard', {
     method: 'POST',
     body: JSON.stringify({ user_id: userId, letterboxd_handle: letterboxdHandle }),
   })
+  log('onboard', `job queued`, result)
+  return result
 }
 
-/** Poll the status of a scrape/enrich job */
-export async function fetchJobStatus(jobId: string): Promise<ScrapeJob> {
-  return apiFetch(`/api/status/${jobId}`)
+export async function fetchJobStatus(jobId: string) {
+  return apiFetch<ScrapeJob>(`/api/status/${jobId}`)
 }
 
-/** Fetch match candidates for the current user */
-export async function fetchMatches(userId: string): Promise<Match[]> {
-  return apiFetch('/api/match', {
+// ── Soul portrait ────────────────────────────────────────────────────────────
+
+/** Generate a new soul portrait (calls Claude — takes ~5s). */
+export async function generateSoul(userId: string) {
+  log('soul', `generating portrait  user=${userId}`)
+  const result = await apiFetch<{ portrait: string }>(`/api/soul/${userId}`, {
+    method: 'POST',
+  })
+  log('soul', `portrait generated  length=${result.portrait.length}`)
+  return result
+}
+
+/** Fetch an existing soul portrait (404 if not yet generated). */
+export async function fetchSoul(userId: string) {
+  log('soul', `fetching portrait  user=${userId}`)
+  return apiFetch<SoulPortraitResponse>(`/api/soul/${userId}`)
+}
+
+// ── Matching ─────────────────────────────────────────────────────────────────
+
+/**
+ * Compute and persist matches for a user (runs the similarity pipeline).
+ * Fire-and-forget — call after soul generation; response is not needed by UI.
+ */
+export async function computeMatches(userId: string) {
+  log('match', `computing matches  user=${userId}`)
+  const result = await apiFetch<{ count: number }>('/api/match', {
     method: 'POST',
     body: JSON.stringify({ user_id: userId }),
   })
+  log('match', `computed  count=${result.count}`)
+  return result
 }
 
-/** Fetch or generate the soul portrait for a user */
-export async function fetchSoulPortrait(userId: string): Promise<SoulPortrait> {
-  return apiFetch(`/api/soul/${userId}`)
+/**
+ * Fetch stored match list for the discover feed.
+ * Score comes back as 0–1 float; converted to 0–100 integer here.
+ */
+export async function fetchMatchList(userId: string): Promise<MatchListItem[]> {
+  log('match', `fetching list  user=${userId}`)
+  const result = await apiFetch<{ matches: MatchListItem[]; count: number }>(
+    `/api/matches/${userId}`
+  )
+  log('match', `fetched  count=${result.count}`)
+  // Normalise score: pgvector cosine similarity is 0–1, display wants 0–100
+  return result.matches.map((m) => ({ ...m, score: Math.round(m.score * 100) }))
+}
+
+/**
+ * Fetch full match detail including shared films and disagreements.
+ * user_id identifies the requester so ratings are oriented correctly.
+ */
+export async function fetchMatch(matchId: string, userId: string): Promise<MatchDetail> {
+  log('match', `fetching detail  match=${matchId}  user=${userId}`)
+  const result = await apiFetch<MatchDetail>(
+    `/api/match/${matchId}?user_id=${userId}`
+  )
+  return { ...result, score: Math.round(result.score * 100) }
 }

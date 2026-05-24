@@ -1,9 +1,7 @@
 /**
- * Shared TypeScript types for Framed — mirrors Go backend models.
- * These types are used across API routes, hooks, and components.
+ * Shared TypeScript types for Framed — mirrors Go backend response shapes.
  */
 
-/** Represents a scrape/enrich job returned by the onboard endpoint */
 export interface ScrapeJob {
   id: string
   status: 'queued' | 'scraping' | 'enriching' | 'embedding' | 'complete' | 'failed'
@@ -13,68 +11,51 @@ export interface ScrapeJob {
   completed_at: string | null
 }
 
-/** A match between two users with a compatibility score */
-export interface Match {
-  id: string
-  userA: string
-  userB: string
-  score: number
-  firstDateFilmId: string
-  why_text?: string
-}
-
-/** A film in the system */
-export interface Film {
+export interface FilmSummary {
   id: string
   title: string
   year: number
-  tmdb_id?: number
-  poster_url?: string
-  director?: string
-  genre?: string[]
-  keywords?: string[]
 }
 
-/** A user rating of a film */
-export interface UserRating {
-  film_id: string
-  user_id: string
-  rating: number | null
-  watched_date: string | null
-  liked: boolean
+/** A film with both users' ratings — used in match detail shared/disagreement lists */
+export interface RatedFilm extends FilmSummary {
+  your_rating: number
+  their_rating: number
 }
 
-/** A user profile */
-export interface UserProfile {
+/** The other user as returned by GET /matches and GET /match */
+export interface OtherUser {
   id: string
   letterboxd_handle: string
-  display_name?: string
-  age?: number
-  location?: string
-  bio?: string
-  intentions?: string[]
-  films_watched?: number
-  obscurity_score?: number
-  avg_rating?: number
-  favourite_era?: string
-  now_showing?: string
-  prompts?: FilmPrompt[]
+  age: number
+  location_city: string
+  location_country: string
 }
 
-/** A film-anchored prompt on a profile */
-export interface FilmPrompt {
-  film_title: string
-  prompt: string
-  answer: string
+/** One item from GET /matches/:user_id */
+export interface MatchListItem {
+  id: string
+  score: number
+  why_text: string
+  status: string
+  other_user: OtherUser
+  first_date_film: FilmSummary | null
 }
 
-/** The generated soul portrait for a user */
-export interface SoulPortrait {
-  user_id: string
+/** Full match detail from GET /match/:matchId */
+export interface MatchDetail extends MatchListItem {
+  shared_films: RatedFilm[]
+  disagreement_films: RatedFilm[]
+}
+
+/** Response from GET /soul/:user_id */
+export interface SoulPortraitResponse {
   portrait: string
-  director_note?: string
-  opening_titles?: Film[]
+  summary_line: string
+  computed_at: string
 }
+
+export type PosterVariant = 'coral' | 'teal' | 'amber' | 'blue' | 'coral-deep'
 
 /** A chat message */
 export interface ChatMessage {
@@ -83,15 +64,4 @@ export interface ChatMessage {
   sender_id: string
   content: string
   sent_at: string
-}
-
-/** Film poster color variants — cycle through these for poster grids */
-export type PosterVariant = 'coral' | 'teal' | 'amber' | 'blue' | 'coral-deep'
-
-/** Pipeline stage for the portrait loading screen */
-export interface PipelineStage {
-  key: string
-  label: string
-  romanNumeral: string
-  completedStatus: ScrapeJob['status'][]
 }
