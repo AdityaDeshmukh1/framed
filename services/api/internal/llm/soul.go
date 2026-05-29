@@ -14,9 +14,10 @@ const soulSystemPrompt = `You write Cinematic Soul portraits for a film-taste da
   Tone: deadpan, witty, slightly cutting. Like a horoscope written by someone who has seen too many
   movies.
   Each sentence escalates — first observational, second an inference, third the uncomfortable truth.
-  Plain language. No film jargon. You may reference well-known films, directors, or actors that a
-  casual moviegoer would recognize (think Nolan, SRK, The Devil Wears Prada — not Tarkovsky or
-  Chantal Akerman). No obscure references. If in doubt, leave the name out.
+  Plain language. No film jargon.
+  You MUST name-drop at least one specific director and one specific film title from the data
+  provided — this is what makes the portrait feel like it's about THIS person and not a template.
+  Weave the names in naturally; don't just list them.
   Never be generic. Never mention the app.
   Like: 'Watches everything twice. Probably cried at a film they'd never admit to. The kind of
   person who has opinions about directors most people haven't heard of, but somehow makes it feel

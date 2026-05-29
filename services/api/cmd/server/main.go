@@ -12,6 +12,7 @@ import (
 	"github.com/framed-app/api/internal/enrichment"
 	"github.com/framed-app/api/internal/handlers"
 	"github.com/framed-app/api/internal/jobs"
+	"github.com/framed-app/api/internal/middleware"
 	"github.com/framed-app/api/internal/scraper"
 	"github.com/framed-app/api/pkg/config"
 	"github.com/framed-app/api/pkg/db"
@@ -83,17 +84,18 @@ func main() {
 		TimeFormat: "15:04:05",
 	}))
 	h := handlers.New(pool, asynqClient, cfg.AnthropicApiKey)
+	auth := middleware.ClerkAuth(pool, cfg.ClerkSecretKey)
 
-	// Register Routes
-	app.Post("/onboard", h.Onboard)
-	app.Get("/status/:jobId", h.Status)
+	// All routes require a valid Clerk JWT.
+	app.Post("/onboard", auth, h.Onboard)
+	app.Get("/status/:jobId", auth, h.Status)
 
-	app.Post("/match", h.Match)
-	app.Get("/matches/:user_id", h.GetMatches)
-	app.Get("/match/:matchId", h.GetMatch)
+	app.Post("/match", auth, h.Match)
+	app.Get("/matches", auth, h.GetMatches)
+	app.Get("/match/:matchId", auth, h.GetMatch)
 
-	app.Post("/soul/:user_id", h.Soul)
-	app.Get("/soul/:user_id", h.GetSoul)
+	app.Post("/soul", auth, h.Soul)
+	app.Get("/soul", auth, h.GetSoul)
 
 	addr := fmt.Sprintf(":%s", cfg.APIPort)
 	go app.Listen(addr)

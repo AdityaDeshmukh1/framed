@@ -8,9 +8,6 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-type matchRequest struct {
-	UserID string `json:"user_id"`
-}
 
 type filmSummary struct {
 	ID    string `json:"id"`
@@ -45,37 +42,32 @@ type ratedFilm struct {
 
 // Match (POST /match) — compute + persist matches for a user.
 func (h *Handlers) Match(c *fiber.Ctx) error {
-	var req matchRequest
-	if err := c.BodyParser(&req); err != nil || req.UserID == "" {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "user_id is required",
-		})
-	}
+	userID, _ := c.Locals("userID").(string)
 
-	log.Printf("[match] finding matches for user=%s", req.UserID)
+	log.Printf("[match] finding matches for user=%s", userID)
 
-	matches, err := h.matcher.FindMatches(c.Context(), req.UserID, 20)
+	matches, err := h.matcher.FindMatches(c.Context(), userID, 20)
 	if err != nil {
-		log.Printf("[match] error for user=%s err=%v", req.UserID, err)
+		log.Printf("[match] error for user=%s err=%v", userID, err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "failed to compute matches",
 		})
 	}
 
-	log.Printf("[match] found %d matches for user=%s", len(matches), req.UserID)
+	log.Printf("[match] found %d matches for user=%s", len(matches), userID)
 
 	if len(matches) > 0 {
 		candidateIDs := make([]string, len(matches))
 		for i, m := range matches {
-			if m.UserA == req.UserID {
+			if m.UserA == userID {
 				candidateIDs[i] = m.UserB
 			} else {
 				candidateIDs[i] = m.UserA
 			}
 		}
-		if task, err := jobs.NewGenerateBlurbsTask(req.UserID, candidateIDs); err == nil {
+		if task, err := jobs.NewGenerateBlurbsTask(userID, candidateIDs); err == nil {
 			if _, err = h.asynqClient.Enqueue(task); err != nil {
-				log.Printf("[match] failed to enqueue blurbs for user=%s err=%v", req.UserID, err)
+				log.Printf("[match] failed to enqueue blurbs for user=%s err=%v", userID, err)
 			}
 		}
 	}
@@ -86,12 +78,9 @@ func (h *Handlers) Match(c *fiber.Ctx) error {
 	})
 }
 
-// GetMatches (GET /matches/:user_id) — return stored matches for a user with other-user info.
+// GetMatches (GET /matches) — return stored matches for the authenticated user.
 func (h *Handlers) GetMatches(c *fiber.Ctx) error {
-	userID := c.Params("user_id")
-	if userID == "" {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "user_id is required"})
-	}
+	userID, _ := c.Locals("userID").(string)
 
 	rows, err := h.pool.Query(c.Context(), `
 		SELECT
@@ -152,12 +141,12 @@ func (h *Handlers) GetMatches(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{"matches": items, "count": len(items)})
 }
 
-// GetMatch (GET /match/:matchId?user_id=...) — return full match detail with shared and disagreement films.
+// GetMatch (GET /match/:matchId) — return full match detail with shared and disagreement films.
 func (h *Handlers) GetMatch(c *fiber.Ctx) error {
 	matchID := c.Params("matchId")
-	requestingUserID := c.Query("user_id")
-	if matchID == "" || requestingUserID == "" {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "matchId param and user_id query param are required"})
+	requestingUserID, _ := c.Locals("userID").(string)
+	if matchID == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "matchId param is required"})
 	}
 
 	// ── Fetch match header ───────────────────────────────────────────────────

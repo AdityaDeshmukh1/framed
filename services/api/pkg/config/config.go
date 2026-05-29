@@ -29,7 +29,7 @@ type Config struct {
 	MLServiceURL    string
 
 	// Auth
-	JWTSecret string
+	ClerkSecretKey string
 
 	// Scraper behaviour
 	ScraperRequestDelayMS int
@@ -53,7 +53,7 @@ func Load() (*Config, error) {
 		AnthropicApiKey: mustGetEnv("ANTHROPIC_API_KEY"),
 		OpenAIApiKey:    mustGetEnv("OPENAI_API_KEY"),
 		MLServiceURL:    getEnv("ML_SERVICE_URL", "http://localhost:8001"),
-		JWTSecret:       mustGetEnv("JWT_SECRET"),
+		ClerkSecretKey:  mustGetEnv("CLERK_SECRET_KEY"),
 	}
 
 	// parse int fields with defaults

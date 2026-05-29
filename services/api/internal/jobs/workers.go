@@ -184,7 +184,8 @@ func (w *Workers) reportEnrichComplete(jobID string) {
 	err := w.pool.QueryRow(ctx,
 		`UPDATE scrape_jobs
 		 SET films_enriched        = films_enriched + 1,
-		     enrichment_started_at = COALESCE(enrichment_started_at, now())
+		     enrichment_started_at = COALESCE(enrichment_started_at, now()),
+		     status                = CASE WHEN films_enriched + 1 >= films_processed THEN 'embedding' ELSE status END
 		 WHERE id = $1
 		 RETURNING films_enriched, films_processed, started_at`,
 		jobID).Scan(&enriched, &target, &startedAt)
@@ -460,6 +461,15 @@ func (w *Workers) handleComputeVector(ctx context.Context, t *asynq.Task) error 
 	}
 
 	log.Printf("[vector] completed user=%s genres=%v directors=%v", payload.UserID, topGenres, topDirectors)
+
+	// Flip the scrape job to 'complete' now that the taste vector exists.
+	// The job's status was 'embedding' — this is the signal the frontend polls for.
+	if _, err = w.pool.Exec(ctx,
+		`UPDATE scrape_jobs SET status = 'complete' WHERE user_id = $1 AND status = 'embedding'`,
+		payload.UserID); err != nil {
+		log.Printf("[vector] failed to mark job complete for user=%s: %v", payload.UserID, err)
+	}
+
 	return nil
 }
 

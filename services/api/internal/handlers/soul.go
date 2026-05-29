@@ -10,12 +10,9 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// Soul generates a Cinematic Soul portrait for a user and stores it in soul_portraits.
+// Soul generates a Cinematic Soul portrait for the authenticated user.
 func (h *Handlers) Soul(c *fiber.Ctx) error {
-	userID := c.Params("user_id")
-	if userID == "" {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "user_id is required"})
-	}
+	userID, _ := c.Locals("userID").(string)
 
 	log.Printf("[soul] generating portrait for user=%s", userID)
 
@@ -101,12 +98,9 @@ func (h *Handlers) fetchFilmTitles(c *fiber.Ctx, userID, query string) ([]string
 	return titles, rows.Err()
 }
 
-// GetSoul fetches an existing soul portrait. Returns 404 if not yet generated.
+// GetSoul fetches an existing soul portrait for the authenticated user.
 func (h *Handlers) GetSoul(c *fiber.Ctx) error {
-	userID := c.Params("user_id")
-	if userID == "" {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "user_id is required"})
-	}
+	userID, _ := c.Locals("userID").(string)
 
 	var portrait, summaryLine string
 	var computedAt time.Time
