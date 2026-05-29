@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"math"
@@ -29,6 +30,9 @@ type Workers struct {
 	pool         *db.Pool
 	anthropicKey string
 	mlServiceURL string
+	// tmdbSem caps concurrent TMDB requests — CloudFront resets connections
+	// when too many hit simultaneously from the same IP.
+	tmdbSem chan struct{}
 }
 
 func NewWorkers(scraper scraper.ProfileImporter, enricher *enrichment.TMDBClient, pool *db.Pool, asynqClient *asynq.Client, anthropicKey, mlServiceURL string) *Workers {
@@ -39,6 +43,7 @@ func NewWorkers(scraper scraper.ProfileImporter, enricher *enrichment.TMDBClient
 		asynqClient:  asynqClient,
 		anthropicKey: anthropicKey,
 		mlServiceURL: mlServiceURL,
+		tmdbSem:      make(chan struct{}, 5),
 	}
 }
 
@@ -69,14 +74,14 @@ func (w *Workers) handleScrapeProfile(ctx context.Context, t *asynq.Task) error 
 		return fmt.Errorf("unmarshal payload: %w", err)
 	}
 
-	log.Printf("[scrape] starting profile scrape for user=%s handle=%s job=%s",
-		payload.UserID, payload.LetterboxdHandle, payload.JobID)
+	scrapeStart := time.Now()
+	log.Printf("[scrape] job=%s user=%s handle=%s starting", payload.JobID, payload.UserID, payload.LetterboxdHandle)
 
 	// Mark as scraping immediately so the UI transitions out of 'queued'
 	if _, err := w.pool.Exec(ctx,
 		`UPDATE scrape_jobs SET status = 'scraping', started_at = now() WHERE id = $1`,
 		payload.JobID); err != nil {
-		log.Printf("[scrape] failed to update job status to scraping: %v", err)
+		log.Printf("[scrape] job=%s failed to update status to scraping: %v", payload.JobID, err)
 	}
 
 	// scrape letterboxd
@@ -85,27 +90,20 @@ func (w *Workers) handleScrapeProfile(ctx context.Context, t *asynq.Task) error 
 		return fmt.Errorf("scrape profile: %w", err)
 	}
 
-	log.Printf("[scrape] found %d films for user=%s", len(ratings), payload.UserID)
+	log.Printf("[scrape] job=%s scraped %d films in %s", payload.JobID, len(ratings), time.Since(scrapeStart).Round(time.Millisecond))
 
 	// Update films_found count now that we know the total
 	if _, err := w.pool.Exec(ctx,
 		`UPDATE scrape_jobs SET films_found = $1 WHERE id = $2`,
 		len(ratings), payload.JobID); err != nil {
-		log.Printf("[scrape] failed to update films_found: %v", err)
+		log.Printf("[scrape] job=%s failed to update films_found: %v", payload.JobID, err)
 	}
 
+	var enqueued, skipped int
 	for _, r := range ratings {
-		var ratingStr string
-		if r.Rating != nil {
-			ratingStr = fmt.Sprintf("%.1f", *r.Rating)
-		} else {
-			ratingStr = "unrated"
-		}
-		log.Printf("[scrape] film=%s year=%d rating=%s rewatch=%v liked=%v slug=%s",
-			r.Title, r.Year, ratingStr, r.Rewatch, r.Liked, r.LetterboxdSlug)
-
 		if r.TMDBMovieID == 0 {
-			log.Printf("[scrape] skipping film=%s — no TMDB ID", r.Title)
+			skipped++
+			log.Printf("[scrape] job=%s skip film=%q — no TMDB ID", payload.JobID, r.Title)
 			continue
 		}
 
@@ -124,7 +122,7 @@ RETURNING id`,
 
 		if err == pgx.ErrNoRows {
 			err = w.pool.QueryRow(ctx,
-				`SELECT id FROM films 
+				`SELECT id FROM films
 			WHERE tmdb_id = $1`,
 				r.TMDBMovieID).Scan(&filmID)
 			if err != nil {
@@ -134,12 +132,12 @@ RETURNING id`,
 			return fmt.Errorf("upsert film: %w", err)
 		}
 
-		enrichTask, err := NewEnrichFilmTask(filmID, r.TMDBMovieID, slug)
+		enrichTask, err := NewEnrichFilmTask(filmID, r.TMDBMovieID, slug, payload.JobID)
 		if err != nil {
-			log.Printf("[scrape] failed to create enrich task for film=%s err=%v", r.Title, err)
+			log.Printf("[scrape] job=%s failed to create enrich task for film=%q: %v", payload.JobID, r.Title, err)
 		} else {
 			if _, err = w.asynqClient.Enqueue(enrichTask, asynq.TaskID("enrich:"+filmID)); err != nil && err != asynq.ErrTaskIDConflict {
-				log.Printf("[scrape] failed to enqueue enrich task for film=%s err=%v", r.Title, err)
+				log.Printf("[scrape] job=%s failed to enqueue enrich task for film=%q: %v", payload.JobID, r.Title, err)
 			}
 		}
 
@@ -155,17 +153,60 @@ VALUES ($1, $2, $3, $4, $5, $6)
 		if err != nil && err != pgx.ErrNoRows {
 			return fmt.Errorf("insert rating: %w", err)
 		}
-		log.Printf("[scrape] processed film=%s filmID=%s", r.Title, filmID)
+		enqueued++
 	}
-	log.Printf("[scrape] completed all films for user=%s", payload.UserID)
 
+	log.Printf("[scrape] job=%s done: %d films queued for enrichment, %d skipped (no TMDB ID), scrape elapsed=%s",
+		payload.JobID, enqueued, skipped, time.Since(scrapeStart).Round(time.Millisecond))
+
+	// films_processed = enrich tasks queued (not total ratings) so handleEnrichFilm
+	// can detect "all done" by comparing films_enriched to films_processed.
 	if _, err = w.pool.Exec(ctx,
-		`UPDATE scrape_jobs SET status = 'complete', films_processed = $1, completed_at = now() WHERE id = $2`,
-		len(ratings), payload.JobID); err != nil {
-		log.Printf("[scrape] failed to update job status to complete: %v", err)
+		`UPDATE scrape_jobs SET status = 'enriching', films_processed = $1, completed_at = now() WHERE id = $2`,
+		enqueued, payload.JobID); err != nil {
+		log.Printf("[scrape] job=%s failed to update status to enriching: %v", payload.JobID, err)
 	}
 
 	return nil
+}
+
+// reportEnrichComplete increments films_enriched for the job and logs a summary
+// when all enrich tasks have finished. Call it at every exit path in handleEnrichFilm.
+func (w *Workers) reportEnrichComplete(jobID string) {
+	if jobID == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	var enriched, target int
+	var startedAt *time.Time
+	err := w.pool.QueryRow(ctx,
+		`UPDATE scrape_jobs
+		 SET films_enriched        = films_enriched + 1,
+		     enrichment_started_at = COALESCE(enrichment_started_at, now())
+		 WHERE id = $1
+		 RETURNING films_enriched, films_processed, started_at`,
+		jobID).Scan(&enriched, &target, &startedAt)
+	if err != nil {
+		log.Printf("[pipeline] job=%s failed to update enrichment counter: %v", jobID, err)
+		return
+	}
+
+	pct := 0
+	if target > 0 {
+		pct = enriched * 100 / target
+	}
+	log.Printf("[pipeline] job=%s progress %d/%d (%d%%)", jobID, enriched, target, pct)
+
+	if target > 0 && enriched >= target {
+		elapsed := "unknown"
+		if startedAt != nil {
+			elapsed = time.Since(*startedAt).Round(time.Second).String()
+		}
+		log.Printf("[pipeline] job=%s ALL ENRICHMENT COMPLETE — %d films, total elapsed=%s",
+			jobID, enriched, elapsed)
+	}
 }
 
 func (w *Workers) handleEnrichFilm(ctx context.Context, t *asynq.Task) error {
@@ -174,34 +215,87 @@ func (w *Workers) handleEnrichFilm(ctx context.Context, t *asynq.Task) error {
 		return fmt.Errorf("unmarshal payload: %w", err)
 	}
 
-	log.Printf("[enrich] enriching film=%s tmdbID=%d", payload.FilmID, payload.TMDBMovieID)
+	enrichStart := time.Now()
+	job := payload.JobID // shorter alias for log lines
 
-	// retry up to 3 times — ISP resets are intermittent
+	// Skip films that are already fully enriched — avoids hitting TMDB on re-runs.
+	// embedding_computed is set true by handleEmbedFilm (including the title+year fallback),
+	// so it's a reliable terminal signal even for films TMDB returns sparse data for.
+	var alreadyEnriched bool
+	if err := w.pool.QueryRow(ctx,
+		`SELECT embedding_computed FROM films WHERE id = $1`,
+		payload.FilmID,
+	).Scan(&alreadyEnriched); err == nil && alreadyEnriched {
+		log.Printf("[enrich] job=%s film=%s tmdbID=%d already enriched — skipping", job, payload.FilmID, payload.TMDBMovieID)
+		defer w.reportEnrichComplete(job)
+		return nil
+	}
+
+	// Serialize TMDB requests — CloudFront resets concurrent connections from the same IP.
+	// The enrichment client also has a token-bucket limiter that spaces out requests.
+	w.tmdbSem <- struct{}{}
+	log.Printf("[enrich] job=%s film=%s tmdbID=%d waiting acquired", job, payload.FilmID, payload.TMDBMovieID)
+
 	var filmData *enrichment.FilmData
 	var err error
-	for attempt := 0; attempt < 3; attempt++ {
+	var attempts int
+	const maxAttempts = 8
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		attempts = attempt + 1
 		filmData, err = w.enricher.GetFilmDetails(ctx, payload.TMDBMovieID)
 		if err == nil {
 			break
 		}
-		log.Printf("[enrich] attempt %d failed for tmdbID=%d err=%v", attempt+1, payload.TMDBMovieID, err)
-		time.Sleep(500 * time.Millisecond)
+		var rl *enrichment.RateLimitError
+		if errors.As(err, &rl) {
+			log.Printf("[enrich] job=%s film=%s tmdbID=%d rate-limited — waiting %s (attempt %d/%d)",
+				job, payload.FilmID, payload.TMDBMovieID, rl.RetryAfter, attempts, maxAttempts)
+			select {
+			case <-time.After(rl.RetryAfter):
+			case <-ctx.Done():
+				<-w.tmdbSem
+				return ctx.Err()
+			}
+			continue
+		}
+		log.Printf("[enrich] job=%s film=%s tmdbID=%d attempt %d/%d failed: %v",
+			job, payload.FilmID, payload.TMDBMovieID, attempts, maxAttempts, err)
+		// exponential backoff for non-rate-limit errors: 1s, 2s, 4s …
+		select {
+		case <-time.After(time.Duration(1<<uint(attempt)) * time.Second):
+		case <-ctx.Done():
+			<-w.tmdbSem
+			return ctx.Err()
+		}
 	}
+	<-w.tmdbSem
+
+	elapsed := time.Since(enrichStart).Round(time.Millisecond)
+
 	if err != nil {
 		if strings.Contains(err.Error(), "not found on TMDB") {
-			log.Printf("[enrich] film=%s tmdbID=%d not found on TMDB — marking as skipped", payload.FilmID, payload.TMDBMovieID)
+			log.Printf("[enrich] job=%s film=%s tmdbID=%d SKIPPED not found on TMDB elapsed=%s",
+				job, payload.FilmID, payload.TMDBMovieID, elapsed)
 			_, _ = w.pool.Exec(ctx,
 				`UPDATE films SET embedding_computed = true WHERE id = $1`,
 				payload.FilmID)
+			w.reportEnrichComplete(job)
 			return nil
 		}
-		return fmt.Errorf("enrich film %s: %w", payload.FilmID, err)
+		// Network failure after all retries — proceed with partial data so the pipeline isn't blocked.
+		log.Printf("[enrich] job=%s film=%s tmdbID=%d FAILED after %d attempts elapsed=%s err=%v",
+			job, payload.FilmID, payload.TMDBMovieID, attempts, elapsed, err)
+		if embedTask, err2 := NewEmbedFilmTask(payload.FilmID); err2 == nil {
+			if _, err2 = w.asynqClient.Enqueue(embedTask, asynq.TaskID("embed:"+payload.FilmID)); err2 != nil && err2 != asynq.ErrTaskIDConflict {
+				log.Printf("[enrich] job=%s failed to enqueue embed task for film=%s: %v", job, payload.FilmID, err2)
+			}
+		}
+		w.reportEnrichComplete(job)
+		return nil
 	}
 
-	log.Printf("[enrich] film=%s keywords=%v", payload.FilmID, filmData.Keywords)
-
 	_, err = w.pool.Exec(ctx,
-		`UPDATE films 
+		`UPDATE films
          SET synopsis = $1, directors = $2, genres = $3, poster_path = $4, themes = $5
          WHERE id = $6`,
 		filmData.Synopsis,
@@ -212,17 +306,23 @@ func (w *Workers) handleEnrichFilm(ctx context.Context, t *asynq.Task) error {
 		payload.FilmID,
 	)
 	if err != nil {
+		log.Printf("[enrich] job=%s film=%s tmdbID=%d DB update failed: %v", job, payload.FilmID, payload.TMDBMovieID, err)
+		w.reportEnrichComplete(job)
 		return fmt.Errorf("update film %s: %w", payload.FilmID, err)
 	}
 
-	log.Printf("[enrich] completed film=%s", payload.FilmID)
+	log.Printf("[enrich] job=%s film=%s tmdbID=%d OK attempts=%d elapsed=%s directors=%v genres=%v keywords=%d",
+		job, payload.FilmID, payload.TMDBMovieID, attempts, elapsed,
+		filmData.Directors, filmData.Genres, len(filmData.Keywords))
+
+	w.reportEnrichComplete(job)
 
 	embedTask, err := NewEmbedFilmTask(payload.FilmID)
 	if err != nil {
-		log.Printf("[enrich] failed to create embed task for film=%s err=%v", payload.FilmID, err)
+		log.Printf("[enrich] job=%s failed to create embed task for film=%s: %v", job, payload.FilmID, err)
 	} else {
 		if _, err = w.asynqClient.Enqueue(embedTask, asynq.TaskID("embed:"+payload.FilmID)); err != nil && err != asynq.ErrTaskIDConflict {
-			log.Printf("[enrich] failed to enqueue embed task for film=%s err=%v", payload.FilmID, err)
+			log.Printf("[enrich] job=%s failed to enqueue embed task for film=%s: %v", job, payload.FilmID, err)
 		}
 	}
 	return nil
@@ -474,13 +574,14 @@ func (w *Workers) handleEmbedFilm(ctx context.Context, t *asynq.Task) error {
 
 	log.Printf("[embed] starting embed for film=%s", payload.FilmID)
 
-	var synopsis string
+	var synopsis, title string
+	var year int
 	var genres, directors, themes []string
 
 	err := w.pool.QueryRow(ctx,
-		`SELECT synopsis, genres, directors, themes FROM films 
+		`SELECT synopsis, genres, directors, themes, title, year FROM films
 			WHERE id = $1`,
-		payload.FilmID).Scan(&synopsis, &genres, &directors, &themes)
+		payload.FilmID).Scan(&synopsis, &genres, &directors, &themes, &title, &year)
 	if err != nil {
 		return fmt.Errorf("fetch film id: %w", err)
 	}
@@ -489,6 +590,12 @@ func (w *Workers) handleEmbedFilm(ctx context.Context, t *asynq.Task) error {
 		strings.Join(directors, " ") + ". " +
 		strings.Join(themes, " ") + ". " +
 		synopsis
+	if strings.TrimSpace(strings.ReplaceAll(embeddingText, ".", "")) == "" {
+		// Enrichment failed for this film — fall back to title+year so the
+		// embedding is still meaningful and the vector computation can proceed.
+		embeddingText = fmt.Sprintf("%s %d", title, year)
+		log.Printf("[embed] film=%s using title+year fallback (no enrichment data)", payload.FilmID)
+	}
 
 	endpoint := w.mlServiceURL + "/embed"
 

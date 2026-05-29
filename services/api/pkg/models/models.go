@@ -201,6 +201,7 @@ type EnrichFilmPayload struct {
 	TMDBMovieID    int    `json:"tmdbMovieId"`
 	FilmID         string `json:"filmId"`
 	LetterboxdSlug string `json:"letterboxdSlug"`
+	JobID          string `json:"jobId"` // scrape job that triggered this — for log correlation
 }
 
 // ComputeVectorPayload triggers taste vector recomputation for a user.

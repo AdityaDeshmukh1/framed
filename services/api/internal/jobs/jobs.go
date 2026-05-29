@@ -36,11 +36,12 @@ func NewComputeVectorTask(userID string) (*asynq.Task, error) {
 	return asynq.NewTask(string(models.JobTypeComputeVector), bytes), nil
 }
 
-func NewEnrichFilmTask(filmID string, tmdbID int, slug string) (*asynq.Task, error) {
+func NewEnrichFilmTask(filmID string, tmdbID int, slug, jobID string) (*asynq.Task, error) {
 	payload := models.EnrichFilmPayload{
 		FilmID:         filmID,
 		TMDBMovieID:    tmdbID,
 		LetterboxdSlug: slug,
+		JobID:          jobID,
 	}
 
 	bytes, err := json.Marshal(payload)

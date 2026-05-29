@@ -7,30 +7,69 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
+	"strconv"
 	"time"
+
+	"golang.org/x/time/rate"
 )
 
-const baseURL = "https://api.themoviedb.org/3"
+const defaultBaseURL = "https://api.themoviedb.org/3"
+
+func resolveBaseURL() string {
+	if v := os.Getenv("TMDB_BASE_URL"); v != "" {
+		return v
+	}
+	return defaultBaseURL
+}
+
+// RateLimitError is returned when TMDB responds with 429 Too Many Requests.
+// RetryAfter is parsed from the Retry-After response header.
+type RateLimitError struct {
+	RetryAfter time.Duration
+}
+
+func (e *RateLimitError) Error() string {
+	return fmt.Sprintf("TMDB rate limited: retry after %s", e.RetryAfter)
+}
 
 type TMDBClient struct {
-	client *http.Client
-	apiKey string
+	client  *http.Client
+	apiKey  string
+	baseURL string
+	limiter *rate.Limiter
 }
 
 func New(apiKey string) *TMDBClient {
 	return &TMDBClient{
 		client: &http.Client{
-			Timeout: 15 * time.Second,
+			Timeout: 30 * time.Second,
 			Transport: &http.Transport{
+				// Proxy reads HTTPS_PROXY / HTTP_PROXY / NO_PROXY from the environment.
+				Proxy: http.ProxyFromEnvironment,
 				DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-					// force IPv4 — IPv6 connections to CloudFront are
-					// reset by some ISPs (particularly in India)
+					// force IPv4 — IPv6 to CloudFront is reset by some Indian ISPs
 					return (&net.Dialer{}).DialContext(ctx, "tcp4", addr)
 				},
 			},
 		},
-		apiKey: apiKey,
+		apiKey:  apiKey,
+		baseURL: resolveBaseURL(),
+		// 30 req/s, burst 10 — well under TMDB's 40 req/s limit.
+		limiter: rate.NewLimiter(rate.Limit(30), 10),
 	}
+}
+
+// rateLimitFromResponse parses a 429 response and returns a RateLimitError.
+// Falls back to 5s if the Retry-After header is absent or unparseable.
+func rateLimitFromResponse(resp *http.Response) *RateLimitError {
+	retryAfter := 5 * time.Second
+	if ra := resp.Header.Get("Retry-After"); ra != "" {
+		if secs, err := strconv.Atoi(ra); err == nil && secs > 0 {
+			retryAfter = time.Duration(secs) * time.Second
+		}
+	}
+	return &RateLimitError{RetryAfter: retryAfter}
 }
 
 // tmdbSearchResult maps the TMDB search endpoint response
@@ -104,12 +143,16 @@ type FilmData struct {
 // SearchFilm finds a film on TMDB by title and year, returns its TMDB ID.
 // You wrote this — it lives here now.
 func (t *TMDBClient) SearchFilm(ctx context.Context, title string, year int) (int, error) {
+	if err := t.limiter.Wait(ctx); err != nil {
+		return 0, fmt.Errorf("rate limiter: %w", err)
+	}
+
 	// url.QueryEscape handles titles with spaces, special characters
 	// "Mulholland Drive" → "Mulholland+Drive"
 	escapedTitle := url.QueryEscape(title)
 
 	endpoint := fmt.Sprintf("%s/search/movie?api_key=%s&query=%s&year=%d",
-		baseURL, t.apiKey, escapedTitle, year,
+		t.baseURL, t.apiKey, escapedTitle, year,
 	)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
@@ -123,6 +166,9 @@ func (t *TMDBClient) SearchFilm(ctx context.Context, title string, year int) (in
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode == http.StatusTooManyRequests {
+		return 0, rateLimitFromResponse(resp)
+	}
 	if resp.StatusCode != http.StatusOK {
 		return 0, fmt.Errorf("unexpected status %d", resp.StatusCode)
 	}
@@ -143,8 +189,12 @@ func (t *TMDBClient) SearchFilm(ctx context.Context, title string, year int) (in
 // We append_to_response to get keywords and credits in one request
 // instead of three — saves API quota.
 func (t *TMDBClient) GetFilmDetails(ctx context.Context, tmdbID int) (*FilmData, error) {
+	if err := t.limiter.Wait(ctx); err != nil {
+		return nil, fmt.Errorf("rate limiter: %w", err)
+	}
+
 	endpoint := fmt.Sprintf("%s/movie/%d?api_key=%s&append_to_response=keywords,credits",
-		baseURL, tmdbID, t.apiKey,
+		t.baseURL, tmdbID, t.apiKey,
 	)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
@@ -158,6 +208,9 @@ func (t *TMDBClient) GetFilmDetails(ctx context.Context, tmdbID int) (*FilmData,
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode == http.StatusTooManyRequests {
+		return nil, rateLimitFromResponse(resp)
+	}
 	if resp.StatusCode == http.StatusNotFound {
 		return nil, fmt.Errorf("film %d not found on TMDB", tmdbID)
 	}
@@ -186,6 +239,11 @@ func toFilmData(d *tmdbFilmDetail) *FilmData {
 		PosterPath: d.PosterPath,
 		Popularity: d.Popularity,
 		AvgRating:  d.VoteAverage,
+		// Initialize to empty slices, not nil — pgx sends nil as SQL NULL
+		// which violates the NOT NULL DEFAULT '{}' constraints on these columns.
+		Directors: []string{},
+		Genres:    []string{},
+		Keywords:  []string{},
 	}
 
 	// extract year from "2001-09-08" → 2001
