@@ -1,13 +1,7 @@
 'use client'
 
-/**
- * useMatches — fetches stored match list for the current user via GET /api/matches/[userId].
- * Uses TanStack Query for caching and background refetches.
- */
-
 import { useQuery } from '@tanstack/react-query'
 import { fetchMatchList } from '../lib/api'
-import { MOCK_USER_ID } from '../lib/constants'
 import type { MatchListItem } from '../lib/types'
 
 interface UseMatchesResult {
@@ -17,10 +11,10 @@ interface UseMatchesResult {
   refetch: () => void
 }
 
-export function useMatches(userId: string = MOCK_USER_ID): UseMatchesResult {
+export function useMatches(): UseMatchesResult {
   const { data, isLoading, error, refetch } = useQuery({
-    queryKey: ['matches', userId],
-    queryFn: () => fetchMatchList(userId),
+    queryKey: ['matches'],
+    queryFn: () => fetchMatchList(),
     staleTime: 5 * 60 * 1000,
   })
 

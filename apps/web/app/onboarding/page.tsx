@@ -14,7 +14,6 @@ import { Input } from '../../components/ui/Input'
 import { Button } from '../../components/ui/Button'
 import { RuleDouble } from '../../components/ui/Dividers'
 import { startOnboarding } from '../../lib/api'
-import { MOCK_USER_ID } from '../../lib/constants'
 
 export default function OnboardingPage() {
   const router = useRouter()
@@ -31,7 +30,7 @@ export default function OnboardingPage() {
     setError(null)
 
     try {
-      const data = await startOnboarding(MOCK_USER_ID, trimmedHandle)
+      const data = await startOnboarding(trimmedHandle)
       router.push(`/portrait?jobId=${data.job_id}`)
     } catch {
       // If the backend is not running, proceed to portrait with a mock job ID

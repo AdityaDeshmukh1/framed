@@ -1,7 +1,7 @@
 /**
  * Typed fetch wrappers for all Framed API routes.
- * Client-side calls go through /api/* proxy routes (avoids CORS).
- * Server-side calls use API_BASE_URL directly.
+ * Client-side calls go through /api/* proxy routes (avoids CORS + adds auth).
+ * The proxy routes forward Authorization: Bearer tokens to the Go backend.
  *
  * Log format: [framed:<scope>] → METHOD /path  |  ✓ ... → 200  |  ✗ ... → 4xx
  */
@@ -34,11 +34,11 @@ async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
 
 // ── Onboarding ───────────────────────────────────────────────────────────────
 
-export async function startOnboarding(userId: string, letterboxdHandle: string) {
-  log('onboard', `starting pipeline  user=${userId}  handle=@${letterboxdHandle}`)
+export async function startOnboarding(letterboxdHandle: string) {
+  log('onboard', `starting pipeline  handle=@${letterboxdHandle}`)
   const result = await apiFetch<{ job_id: string; status: string }>('/api/onboard', {
     method: 'POST',
-    body: JSON.stringify({ user_id: userId, letterboxd_handle: letterboxdHandle }),
+    body: JSON.stringify({ letterboxd_handle: letterboxdHandle }),
   })
   log('onboard', `job queued`, result)
   return result
@@ -51,9 +51,9 @@ export async function fetchJobStatus(jobId: string) {
 // ── Soul portrait ────────────────────────────────────────────────────────────
 
 /** Generate a new soul portrait (calls Claude — takes ~5s). */
-export async function generateSoul(userId: string) {
-  log('soul', `generating portrait  user=${userId}`)
-  const result = await apiFetch<{ portrait: string }>(`/api/soul/${userId}`, {
+export async function generateSoul() {
+  log('soul', `generating portrait`)
+  const result = await apiFetch<{ portrait: string }>('/api/soul', {
     method: 'POST',
   })
   log('soul', `portrait generated  length=${result.portrait.length}`)
@@ -61,22 +61,21 @@ export async function generateSoul(userId: string) {
 }
 
 /** Fetch an existing soul portrait (404 if not yet generated). */
-export async function fetchSoul(userId: string) {
-  log('soul', `fetching portrait  user=${userId}`)
-  return apiFetch<SoulPortraitResponse>(`/api/soul/${userId}`)
+export async function fetchSoul() {
+  log('soul', `fetching portrait`)
+  return apiFetch<SoulPortraitResponse>('/api/soul')
 }
 
 // ── Matching ─────────────────────────────────────────────────────────────────
 
 /**
- * Compute and persist matches for a user (runs the similarity pipeline).
+ * Compute and persist matches (runs the similarity pipeline).
  * Fire-and-forget — call after soul generation; response is not needed by UI.
  */
-export async function computeMatches(userId: string) {
-  log('match', `computing matches  user=${userId}`)
+export async function computeMatches() {
+  log('match', `computing matches`)
   const result = await apiFetch<{ count: number }>('/api/match', {
     method: 'POST',
-    body: JSON.stringify({ user_id: userId }),
   })
   log('match', `computed  count=${result.count}`)
   return result
@@ -86,24 +85,18 @@ export async function computeMatches(userId: string) {
  * Fetch stored match list for the discover feed.
  * Score comes back as 0–1 float; converted to 0–100 integer here.
  */
-export async function fetchMatchList(userId: string): Promise<MatchListItem[]> {
-  log('match', `fetching list  user=${userId}`)
-  const result = await apiFetch<{ matches: MatchListItem[]; count: number }>(
-    `/api/matches/${userId}`
-  )
+export async function fetchMatchList(): Promise<MatchListItem[]> {
+  log('match', `fetching list`)
+  const result = await apiFetch<{ matches: MatchListItem[]; count: number }>('/api/matches')
   log('match', `fetched  count=${result.count}`)
-  // Normalise score: pgvector cosine similarity is 0–1, display wants 0–100
   return result.matches.map((m) => ({ ...m, score: Math.round(m.score * 100) }))
 }
 
 /**
  * Fetch full match detail including shared films and disagreements.
- * user_id identifies the requester so ratings are oriented correctly.
  */
-export async function fetchMatch(matchId: string, userId: string): Promise<MatchDetail> {
-  log('match', `fetching detail  match=${matchId}  user=${userId}`)
-  const result = await apiFetch<MatchDetail>(
-    `/api/match/${matchId}?user_id=${userId}`
-  )
+export async function fetchMatch(matchId: string): Promise<MatchDetail> {
+  log('match', `fetching detail  match=${matchId}`)
+  const result = await apiFetch<MatchDetail>(`/api/match/${matchId}`)
   return { ...result, score: Math.round(result.score * 100) }
 }

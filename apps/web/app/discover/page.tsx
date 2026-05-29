@@ -14,7 +14,6 @@ import { MatchCard } from '../../components/features/MatchCard'
 import { Badge } from '../../components/ui/Badge'
 import { RuleDouble } from '../../components/ui/Dividers'
 import { fetchMatchList } from '../../lib/api'
-import { MOCK_USER_ID } from '../../lib/constants'
 import type { MatchListItem } from '../../lib/types'
 
 function SettingsIcon() {
@@ -51,8 +50,8 @@ export default function DiscoverPage() {
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    console.log('[framed:discover] fetching matches for user', MOCK_USER_ID)
-    fetchMatchList(MOCK_USER_ID)
+    console.log('[framed:discover] fetching matches')
+    fetchMatchList()
       .then((data) => {
         console.log(`[framed:discover] loaded ${data.length} matches`)
         setMatches(data)

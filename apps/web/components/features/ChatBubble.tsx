@@ -3,17 +3,11 @@
  * Server component — purely presentational.
  */
 
-import { MOCK_USER_ID } from '../../lib/constants'
-
-/** Props for the ChatBubble component */
 interface Props {
-  /** The message text */
   content: string
-  /** The ID of the sender — compared against MOCK_USER_ID to determine alignment */
-  senderId: string
-  /** Optional display name for the sender (shown on left bubbles) */
+  /** Whether this bubble belongs to the current user (right-aligned, coral). */
+  isMine: boolean
   senderName?: string
-  /** ISO timestamp */
   sentAt?: string
 }
 
@@ -22,8 +16,7 @@ function formatBubbleTime(iso: string): string {
   return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })
 }
 
-export function ChatBubble({ content, senderId, senderName, sentAt }: Props) {
-  const isMine = senderId === MOCK_USER_ID
+export function ChatBubble({ content, isMine, senderName, sentAt }: Props) {
 
   return (
     <div

@@ -1,20 +1,18 @@
-/**
- * GET /api/match/[matchId]?user_id=... — fetches full match detail.
- * user_id query param identifies the requester (to orient "your" vs "their" ratings).
- * Returns: MatchDetail object with shared_films and disagreement_films.
- */
-
+import { auth } from '@clerk/nextjs/server'
 import { API_BASE_URL } from '../../../../lib/constants'
 
 export async function GET(
-  request: Request,
+  _request: Request,
   { params }: { params: Promise<{ matchId: string }> }
 ): Promise<Response> {
+  const { getToken } = await auth()
+  const token = await getToken()
   const { matchId } = await params
-  const { searchParams } = new URL(request.url)
-  const userId = searchParams.get('user_id') ?? ''
 
-  const res = await fetch(`${API_BASE_URL}/match/${matchId}?user_id=${userId}`)
+  const res = await fetch(`${API_BASE_URL}/match/${matchId}`, {
+    headers: { 'Authorization': `Bearer ${token}` },
+  })
+
   const data = await res.json()
   return Response.json(data, { status: res.status })
 }

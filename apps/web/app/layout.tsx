@@ -9,6 +9,7 @@ import {
   DM_Sans,
   JetBrains_Mono,
 } from 'next/font/google'
+import { ClerkProvider } from '@clerk/nextjs'
 import { ReactQueryProvider } from '../lib/providers'
 import './globals.css'
 
@@ -61,7 +62,9 @@ export default function RootLayout({
         <link rel="manifest" href="/manifest.json" />
       </head>
       <body className="min-h-full flex flex-col" style={{ background: 'var(--cream)' }}>
-        <ReactQueryProvider>{children}</ReactQueryProvider>
+        <ClerkProvider afterSignOutUrl="/sign-in">
+          <ReactQueryProvider>{children}</ReactQueryProvider>
+        </ClerkProvider>
       </body>
     </html>
   )

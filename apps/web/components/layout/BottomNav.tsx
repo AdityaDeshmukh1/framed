@@ -8,7 +8,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 
-type TabKey = 'portrait' | 'discover' | 'matches' | 'chat' | 'siblings'
+type TabKey = 'portrait' | 'discover'
 
 /** Props for the BottomNav component */
 interface Props {
@@ -61,8 +61,6 @@ function ChatIcon() {
 const TABS: Tab[] = [
   { key: 'portrait', href: '/profile', label: 'Portrait', icon: <PortraitIcon /> },
   { key: 'discover', href: '/discover', label: 'Discover', icon: <DiscoverIcon /> },
-  { key: 'matches', href: '/siblings', label: 'Siblings', icon: <MatchesIcon /> },
-  { key: 'chat', href: '/chat/match-001', label: 'Chat', icon: <ChatIcon /> },
 ]
 
 export function BottomNav({ activeTab }: Props) {

@@ -13,15 +13,14 @@
 
 import { Suspense, useEffect, useState, useCallback } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
+import { useUser } from '@clerk/nextjs'
 import { motion, AnimatePresence } from 'framer-motion'
 import { PhoneShell } from '../../components/layout/PhoneShell'
 import { StatusBar } from '../../components/layout/StatusBar'
 import { Button } from '../../components/ui/Button'
-import { PosterGrid } from '../../components/features/PosterGrid'
 import { SoulPortrait } from '../../components/features/SoulPortrait'
 import { RuleDouble, DiamondDivider } from '../../components/ui/Dividers'
 import { fetchJobStatus, generateSoul, computeMatches } from '../../lib/api'
-import { MOCK_SOUL_PORTRAIT, MOCK_USER, MOCK_USER_ID } from '../../lib/constants'
 import type { ScrapeJob } from '../../lib/types'
 
 type Phase = 'loading' | 'generating' | 'reveal'
@@ -40,12 +39,6 @@ const ACCURACY_OPTIONS = [
   { label: 'who is this?', value: 1 },
 ]
 
-const MOCK_FILMS = [
-  { id: 'f1', title: 'In the Mood for Love', year: 2000 },
-  { id: 'f2', title: 'Stalker',              year: 1979 },
-  { id: 'f3', title: 'Chungking Express',    year: 1994 },
-  { id: 'f4', title: 'Persona',              year: 1966 },
-]
 
 function stageProgress(job: ScrapeJob | null, phase: Phase): number {
   if (phase === 'reveal')     return 100
@@ -79,10 +72,12 @@ function PortraitInner() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const jobId = searchParams.get('jobId')
+  const { user } = useUser()
+  const displayName = user?.username || user?.firstName || 'You'
 
   const [job, setJob] = useState<ScrapeJob | null>(null)
   const [phase, setPhase] = useState<Phase>('loading')
-  const [portrait, setPortrait] = useState<string>(MOCK_SOUL_PORTRAIT.portrait)
+  const [portrait, setPortrait] = useState<string>('')
   const [selectedAccuracy, setSelectedAccuracy] = useState<number | null>(null)
 
   // Called once the pipeline job reaches 'complete'.
@@ -91,20 +86,17 @@ function PortraitInner() {
     console.log('[framed:portrait] pipeline complete — generating soul portrait')
 
     if (isMock) {
-      // Simulate generation delay in mock mode
       await new Promise((r) => setTimeout(r, 1500))
-      setPortrait(MOCK_SOUL_PORTRAIT.portrait)
     } else {
       try {
-        const data = await generateSoul(MOCK_USER_ID)
+        const data = await generateSoul()
         setPortrait(data.portrait)
-        // Fire-and-forget: compute matches in the background
-        computeMatches(MOCK_USER_ID).catch((err) =>
+        computeMatches().catch((err) =>
           console.warn('[framed:portrait] match computation failed (non-critical):', err)
         )
       } catch (err) {
-        console.warn('[framed:portrait] soul generation failed, using mock:', err)
-        setPortrait(MOCK_SOUL_PORTRAIT.portrait)
+        console.warn('[framed:portrait] soul generation failed:', err)
+        setPortrait('')
       }
     }
 
@@ -265,25 +257,19 @@ function PortraitInner() {
               <p className="chapter-kicker">Your Portrait</p>
               <div className="flex items-baseline gap-3">
                 <h1 className="font-serif italic text-4xl" style={{ color: 'var(--ink-deep)' }}>
-                  {MOCK_USER.display_name}
+                  {displayName}
                 </h1>
-                <span className="font-mono text-sm" style={{ color: 'var(--ink)', opacity: 0.45 }}>
-                  {MOCK_USER.age} · {MOCK_USER.location}
-                </span>
               </div>
               <RuleDouble />
             </div>
 
-            {/* Real soul portrait text */}
-            <SoulPortrait portrait={portrait} showDividers={false} />
-
-            <DiamondDivider />
-
-            {/* Opening titles */}
-            <div className="flex flex-col gap-3">
-              <p className="chapter-kicker">Opening Titles</p>
-              <PosterGrid films={MOCK_FILMS} />
-            </div>
+            {portrait ? (
+              <SoulPortrait portrait={portrait} showDividers={false} />
+            ) : (
+              <p className="font-serif italic text-base text-center" style={{ color: 'var(--ink)', opacity: 0.5 }}>
+                Portrait generation failed — tap below to try again.
+              </p>
+            )}
 
             <DiamondDivider />
 

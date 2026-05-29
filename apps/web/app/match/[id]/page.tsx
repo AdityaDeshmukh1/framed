@@ -16,7 +16,7 @@ import { RuleDouble, RuleThin, DiamondDivider } from '../../../components/ui/Div
 import { Button } from '../../../components/ui/Button'
 import { Badge } from '../../../components/ui/Badge'
 import { fetchMatch } from '../../../lib/api'
-import { MOCK_USER_ID, POSTER_COLOR_SEQUENCE } from '../../../lib/constants'
+import { POSTER_COLOR_SEQUENCE } from '../../../lib/constants'
 import type { MatchDetail, RatedFilm } from '../../../lib/types'
 import type { PosterVariant } from '../../../lib/types'
 
@@ -30,8 +30,8 @@ export default function MatchDetailPage() {
   const [error,     setError]     = useState<string | null>(null)
 
   useEffect(() => {
-    console.log(`[framed:match] loading detail  match=${matchId}  user=${MOCK_USER_ID}`)
-    fetchMatch(matchId, MOCK_USER_ID)
+    console.log(`[framed:match] loading detail  match=${matchId}`)
+    fetchMatch(matchId)
       .then((data) => {
         console.log(`[framed:match] loaded  score=${data.score}%  shared=${data.shared_films.length}  disagreements=${data.disagreement_films.length}`)
         setMatch(data)

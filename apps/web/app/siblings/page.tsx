@@ -10,7 +10,6 @@ import { BottomNav } from '../../components/layout/BottomNav'
 import { SiblingCard } from '../../components/features/SiblingCard'
 import { RuleDouble, DiamondDivider } from '../../components/ui/Dividers'
 import { Badge } from '../../components/ui/Badge'
-import { MOCK_SIBLINGS } from '../../lib/constants'
 
 function SettingsIcon() {
   return (
@@ -22,7 +21,7 @@ function SettingsIcon() {
 }
 
 export default function SiblingsPage() {
-  const siblings = MOCK_SIBLINGS
+  const siblings: Array<{ id: string; display_name: string; age: number; location: string; letterboxd_handle: string; score: number; shared_trait: string; films_watched: number }> = []
 
   return (
     <PhoneShell hasBottomNav>
@@ -98,7 +97,7 @@ export default function SiblingsPage() {
         </p>
       </div>
 
-      <BottomNav activeTab="matches" />
+      <BottomNav />
     </PhoneShell>
   )
 }

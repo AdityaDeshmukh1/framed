@@ -13,7 +13,7 @@ import { AppBar } from '../../../components/layout/AppBar'
 import { ChatBubble } from '../../../components/features/ChatBubble'
 import { FilmPoster } from '../../../components/features/FilmPoster'
 import { RuleThin } from '../../../components/ui/Dividers'
-import { MOCK_MATCHES, MOCK_MESSAGES, MOCK_USER_ID } from '../../../lib/constants'
+import { useUser } from '@clerk/nextjs'
 
 /** Animated typing indicator dots */
 function TypingIndicator() {
@@ -42,13 +42,13 @@ function SendIcon() {
 
 export default function ChatPage() {
   const { id } = useParams<{ id: string }>()
+  const { user } = useUser()
+  const myId = user?.id ?? 'me'
 
-  const match = MOCK_MATCHES.find((m) => m.id === id) ?? MOCK_MATCHES[0]
+  const match: { id: string; other_user: { display_name: string; letterboxd_handle: string }; first_date_film: { id: string; title: string; year: number } | null; score: number } = { id, other_user: { display_name: '—', letterboxd_handle: '' }, first_date_film: null, score: 0 }
   const { other_user, first_date_film, score } = match
 
-  const [messages, setMessages] = useState(
-    MOCK_MESSAGES.filter((m) => m.match_id === id || m.match_id === match.id)
-  )
+  const [messages, setMessages] = useState<Array<{ id: string; match_id: string; sender_id: string; content: string; sent_at: string }>>([])
   const [inputValue, setInputValue] = useState('')
   const [isTyping, setIsTyping] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -66,7 +66,7 @@ export default function ChatPage() {
     const newMsg = {
       id: `msg-${Date.now()}`,
       match_id: id,
-      sender_id: MOCK_USER_ID,
+      sender_id: myId,
       content: text,
       sent_at: new Date().toISOString(),
     }
@@ -167,7 +167,7 @@ export default function ChatPage() {
             >
               <ChatBubble
                 content={msg.content}
-                senderId={msg.sender_id}
+                isMine={msg.sender_id === myId}
                 senderName={other_user.display_name}
                 sentAt={msg.sent_at}
               />
