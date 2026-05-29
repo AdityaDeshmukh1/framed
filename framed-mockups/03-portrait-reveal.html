@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Framed · Portrait Reveal</title>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500;1,600&family=DM+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --cream: #FAEEDA; --cream-2: #F5E1B8; --ink: #2C2C2A;
+    --coral: #D85A30; --coral-deep: #4A1B0C; --coral-darker: #3A1A0E;
+    --teal: #1D9E75; --amber: #EF9F27; --blue: #185FA5;
+    --serif: 'Cormorant Garamond', Georgia, serif;
+    --sans: 'DM Sans', system-ui, sans-serif;
+    --mono: 'JetBrains Mono', monospace;
+  }
+  html, body { min-height: 100vh; background: var(--coral-darker); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+  .page { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px 16px; }
+  .phone { width: 100%; max-width: 380px; background: var(--cream); border-radius: 28px; border: 1.5px solid var(--coral-deep); overflow: hidden; color: var(--ink); box-shadow: 0 0 0 6px var(--cream), 0 0 0 8px var(--coral-deep), 0 30px 60px -20px rgba(0,0,0,0.6); min-height: 600px; }
+  .status { display: flex; justify-content: space-between; padding: 14px 22px 10px; font-family: var(--serif); font-style: italic; font-size: 12px; letter-spacing: .05em; color: var(--coral-deep); }
+  .rule { border-top: 1px solid var(--coral-deep); border-bottom: 1px solid var(--coral-deep); height: 3px; margin: 0 16px; }
+  .rule-thin { height: 0; border-top: .5px solid var(--coral-deep); margin: 14px 22px; }
+
+  /* ── loading screen ── */
+  #loading-screen { padding: 0 22px 28px; }
+
+  .loading-header { text-align: center; padding: 24px 0 18px; }
+  .loading-header .kicker { font-family: var(--sans); font-size: 9px; letter-spacing: .22em; color: var(--coral-deep); text-transform: lowercase; margin-bottom: 8px; }
+  .loading-header .title { font-family: var(--serif); font-size: 26px; font-weight: 500; color: var(--coral-deep); line-height: 1.1; }
+  .loading-header .sub { font-family: var(--serif); font-style: italic; font-size: 12px; color: var(--ink); margin-top: 6px; opacity: .8; }
+
+  .chapter-cards { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+  .chapter-card { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: .5px solid var(--coral-deep); background: var(--cream-2); opacity: .35; transition: opacity .4s ease; }
+  .chapter-card.done { opacity: 1; }
+  .chapter-card.active { opacity: 1; background: var(--cream); border-color: var(--coral); }
+  .chapter-card .num { font-family: var(--serif); font-style: italic; font-size: 20px; color: var(--coral); flex-shrink: 0; width: 24px; }
+  .chapter-card .content { flex: 1; }
+  .chapter-card .c-label { font-family: var(--sans); font-size: 9px; letter-spacing: .18em; color: var(--coral-deep); text-transform: lowercase; margin-bottom: 3px; }
+  .chapter-card .c-text { font-family: var(--serif); font-style: italic; font-size: 13px; color: var(--ink); }
+  .chapter-card .c-count { font-family: var(--mono); font-size: 11px; color: var(--coral); margin-top: 2px; }
+  .chapter-card .tick { font-size: 14px; color: var(--teal); opacity: 0; transition: opacity .3s; }
+  .chapter-card.done .tick { opacity: 1; }
+
+  .progress-bar-wrap { margin-top: 16px; }
+  .progress-bar-label { display: flex; justify-content: space-between; font-family: var(--mono); font-size: 9px; color: var(--coral-deep); margin-bottom: 5px; }
+  .progress-bar { height: 3px; background: var(--cream-2); border: .5px solid var(--coral-deep); }
+  .progress-fill { height: 100%; background: var(--coral); width: 0%; transition: width .6s ease; }
+
+  /* ── reveal screen ── */
+  #reveal-screen { display: none; }
+  #reveal-screen.visible { display: block; }
+
+  .reveal-header { text-align: center; padding: 22px 22px 16px; }
+  .reveal-header .kicker { font-family: var(--sans); font-size: 9px; letter-spacing: .22em; color: var(--coral-deep); text-transform: lowercase; margin-bottom: 8px; }
+  .reveal-header .name { font-family: var(--serif); font-size: 36px; font-weight: 500; color: var(--coral-deep); line-height: 1; }
+  .reveal-header .meta { font-family: var(--serif); font-style: italic; font-size: 12px; color: var(--ink); margin-top: 4px; }
+
+  .soul-section { padding: 8px 22px; }
+  .soul-label { font-family: var(--sans); font-size: 9px; letter-spacing: .22em; color: var(--coral-deep); text-transform: lowercase; margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }
+  .soul-label::before, .soul-label::after { content: ""; flex: 1; height: .5px; background: var(--coral-deep); opacity: .4; }
+  .soul-text { font-family: var(--serif); font-style: italic; font-size: 16px; line-height: 1.6; color: var(--ink); text-align: justify; }
+
+  .opening-titles { padding: 8px 22px; }
+  .titles-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px; }
+  .poster { aspect-ratio: 2/3; display: flex; flex-direction: column; justify-content: flex-end; color: var(--cream); border: .5px solid var(--coral-deep); overflow: hidden; position: relative; }
+  .poster-meta { position: relative; z-index: 2; padding: 5px 5px 6px; background: linear-gradient(to top, rgba(0,0,0,.82) 0%, rgba(0,0,0,.2) 80%, transparent 100%); }
+  .poster .yr { font-family: var(--mono); font-size: 8px; letter-spacing: .12em; opacity: .85; }
+  .poster .tt { font-family: var(--serif); font-size: 10px; line-height: 1.1; font-weight: 500; }
+
+  /* accuracy feedback */
+  .accuracy { padding: 8px 22px; }
+  .acc-q { font-family: var(--serif); font-size: 15px; color: var(--ink); margin-bottom: 12px; text-align: center; font-style: italic; }
+  .acc-options { display: grid; grid-template-columns: repeat(2, 1fr); gap: 7px; }
+  .acc-btn { padding: 11px 8px; border: .5px solid var(--coral-deep); font-family: var(--serif); font-style: italic; font-size: 12px; color: var(--coral-deep); text-align: center; cursor: pointer; background: var(--cream-2); transition: all .15s; }
+  .acc-btn:hover, .acc-btn.selected { background: var(--coral); color: var(--cream); border-color: var(--coral-deep); }
+
+  .actions { padding: 16px 22px 28px; }
+  .btn-primary { background: var(--coral); color: var(--cream); padding: 14px; text-align: center; font-family: var(--serif); font-size: 15px; border: 1px solid var(--coral-deep); cursor: pointer; letter-spacing: .04em; transition: background .15s; }
+  .btn-primary:hover { background: var(--coral-deep); }
+
+  .diamond { text-align: center; color: var(--coral-deep); font-family: var(--serif); font-size: 11px; letter-spacing: .6em; margin: 8px 0; }
+
+  /* reveal animation */
+  @keyframes fadeUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+  .fade-up { animation: fadeUp .5s ease forwards; }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="phone">
+    <div class="status"><span>9:41</span><span>framed</span></div>
+    <div class="rule"></div>
+
+    <!-- LOADING SCREEN -->
+    <div id="loading-screen">
+      <div class="loading-header">
+        <div class="kicker">reading you</div>
+        <div class="title">Developing your portrait</div>
+        <div class="sub">this takes about 30 seconds</div>
+      </div>
+
+      <div class="chapter-cards">
+        <div class="chapter-card" id="card-0">
+          <div class="num">I</div>
+          <div class="content">
+            <div class="c-label">the archive</div>
+            <div class="c-text">finding your films</div>
+            <div class="c-count" id="count-0"></div>
+          </div>
+          <div class="tick">✓</div>
+        </div>
+        <div class="chapter-card" id="card-1">
+          <div class="num">II</div>
+          <div class="content">
+            <div class="c-label">enrichment</div>
+            <div class="c-text">reading the films</div>
+            <div class="c-count" id="count-1"></div>
+          </div>
+          <div class="tick">✓</div>
+        </div>
+        <div class="chapter-card" id="card-2">
+          <div class="num">III</div>
+          <div class="content">
+            <div class="c-label">the analysis</div>
+            <div class="c-text">understanding your taste</div>
+            <div class="c-count" id="count-2"></div>
+          </div>
+          <div class="tick">✓</div>
+        </div>
+        <div class="chapter-card" id="card-3">
+          <div class="num">IV</div>
+          <div class="content">
+            <div class="c-label">the portrait</div>
+            <div class="c-text">writing who you are</div>
+            <div class="c-count" id="count-3"></div>
+          </div>
+          <div class="tick">✓</div>
+        </div>
+      </div>
+
+      <div class="progress-bar-wrap">
+        <div class="progress-bar-label">
+          <span id="progress-label">starting...</span>
+          <span id="progress-pct">0%</span>
+        </div>
+        <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
+      </div>
+    </div>
+
+    <!-- REVEAL SCREEN -->
+    <div id="reveal-screen">
+      <div class="reveal-header fade-up">
+        <div class="kicker">your cinematic soul</div>
+        <div class="name">Aditya, 22</div>
+        <div class="meta">est. mmxxvi · 412 films</div>
+      </div>
+
+      <div class="rule"></div>
+
+      <div class="soul-section fade-up" style="animation-delay:.2s">
+        <div class="soul-label">your portrait</div>
+        <p class="soul-text">Drawn to films that sit with grief without resolving it. Prefers moral ambiguity over redemption arcs and restraint over spectacle. Rewatches Tarkovsky. Has strong opinions about aspect ratios. Probably thinks Nolan is overrated — and honestly, not wrong.</p>
+      </div>
+
+      <div class="rule-thin"></div>
+
+      <div class="opening-titles fade-up" style="animation-delay:.35s">
+        <div class="soul-label">opening titles</div>
+        <div class="titles-grid">
+          <div class="poster" style="background:#1D9E75;">
+            <div class="poster-meta"><div class="yr">2000</div><div class="tt">In the Mood for Love</div></div>
+          </div>
+          <div class="poster" style="background:#2C2C2A;">
+            <div class="poster-meta"><div class="yr">1979</div><div class="tt">Stalker</div></div>
+          </div>
+          <div class="poster" style="background:#D85A30;">
+            <div class="poster-meta"><div class="yr">1999</div><div class="tt">Beau Travail</div></div>
+          </div>
+          <div class="poster" style="background:#185FA5;">
+            <div class="poster-meta"><div class="yr">1975</div><div class="tt">Jeanne Dielman</div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="rule-thin"></div>
+
+      <div class="accuracy fade-up" style="animation-delay:.5s">
+        <div class="acc-q">does this feel right?</div>
+        <div class="acc-options">
+          <div class="acc-btn" onclick="selectAcc(this)">nailed it</div>
+          <div class="acc-btn" onclick="selectAcc(this)">mostly right</div>
+          <div class="acc-btn" onclick="selectAcc(this)">a bit off</div>
+          <div class="acc-btn" onclick="selectAcc(this)">who is this</div>
+        </div>
+      </div>
+
+      <div class="diamond">· ◆ ·</div>
+
+      <div class="actions fade-up" style="animation-delay:.65s">
+        <div class="btn-primary">this is me — continue →</div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+  // simulate the loading pipeline stages
+  const stages = [
+    { id: 0, label: 'found 412 films', progress: 25, pLabel: 'scanning letterboxd...' },
+    { id: 1, label: 'enriched 412 films', progress: 55, pLabel: 'reading film data...' },
+    { id: 2, label: 'taste vector computed', progress: 80, pLabel: 'analysing your taste...' },
+    { id: 3, label: 'portrait ready', progress: 100, pLabel: 'writing your portrait...' },
+  ];
+
+  let current = 0;
+
+  function activateCard(i) {
+    const card = document.getElementById('card-' + i);
+    card.classList.add('active');
+  }
+
+  function completeCard(i, label) {
+    const card = document.getElementById('card-' + i);
+    card.classList.remove('active');
+    card.classList.add('done');
+    document.getElementById('count-' + i).textContent = label;
+  }
+
+  function setProgress(pct, label) {
+    document.getElementById('progress-fill').style.width = pct + '%';
+    document.getElementById('progress-pct').textContent = pct + '%';
+    document.getElementById('progress-label').textContent = label;
+  }
+
+  function runStage(i) {
+    if (i >= stages.length) {
+      // reveal
+      setTimeout(() => {
+        document.getElementById('loading-screen').style.display = 'none';
+        const reveal = document.getElementById('reveal-screen');
+        reveal.classList.add('visible');
+      }, 600);
+      return;
+    }
+    activateCard(i);
+    setTimeout(() => {
+      completeCard(i, stages[i].label);
+      setProgress(stages[i].progress, stages[i].pLabel);
+      setTimeout(() => runStage(i + 1), 500);
+    }, i === 3 ? 1800 : 1200);
+  }
+
+  setTimeout(() => runStage(0), 600);
+
+  function selectAcc(el) {
+    document.querySelectorAll('.acc-btn').forEach(b => b.classList.remove('selected'));
+    el.classList.add('selected');
+  }
+</script>
+</body>
+</html>

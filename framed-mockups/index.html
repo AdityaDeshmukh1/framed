@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Framed · All Screens</title>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;1,400;1,500&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #3A1A0E; font-family: 'DM Sans', sans-serif; min-height: 100vh; padding: 40px 24px; }
+  h1 { font-family: 'Cormorant Garamond', serif; font-size: 42px; color: #FAEEDA; text-align: center; margin-bottom: 8px; }
+  .sub { font-family: 'Cormorant Garamond', serif; font-style: italic; font-size: 16px; color: #D85A30; text-align: center; margin-bottom: 40px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 14px; max-width: 900px; margin: 0 auto; }
+  a { display: block; background: #FAEEDA; border: 1px solid #4A1B0C; padding: 20px 18px; text-decoration: none; transition: transform .15s, box-shadow .15s; }
+  a:hover { transform: translateY(-3px); box-shadow: 0 6px 0 #4A1B0C; }
+  .screen-num { font-family: 'Cormorant Garamond', serif; font-style: italic; font-size: 13px; color: #D85A30; margin-bottom: 6px; }
+  .screen-name { font-family: 'Cormorant Garamond', serif; font-size: 20px; color: #4A1B0C; font-weight: 500; margin-bottom: 6px; }
+  .screen-desc { font-size: 11px; color: #2C2C2A; line-height: 1.5; }
+  .rule { border-top: 1px solid #4A1B0C; border-bottom: 1px solid #4A1B0C; height: 3px; max-width: 900px; margin: 0 auto 40px; }
+</style>
+</head>
+<body>
+<h1>Framed</h1>
+<p class="sub">all screens · open any to preview</p>
+<div class="rule"></div>
+<div class="grid">
+  <a href="01-landing.html"><div class="screen-num">screen I</div><div class="screen-name">Landing</div><div class="screen-desc">First impression. The pitch. One action.</div></a>
+  <a href="02-onboarding.html"><div class="screen-num">screen II</div><div class="screen-name">Onboarding</div><div class="screen-desc">Letterboxd handle input. Step one of three.</div></a>
+  <a href="03-portrait-reveal.html"><div class="screen-num">screen III</div><div class="screen-name">Portrait Reveal</div><div class="screen-desc">The cinematic loading experience + Soul portrait reveal with accuracy feedback.</div></a>
+  <a href="04-profile.html"><div class="screen-num">screen IV</div><div class="screen-name">Profile Card</div><div class="screen-desc">Full profile — Soul portrait, opening titles, prompts, now showing, intentions.</div></a>
+  <a href="05-match-feed.html"><div class="screen-num">screen V</div><div class="screen-name">Match Feed</div><div class="screen-desc">Ranked matches with blurbs, mini posters, like/pass.</div></a>
+  <a href="06-match-detail.html"><div class="screen-num">screen VI</div><div class="screen-name">Match Detail</div><div class="screen-desc">Chemistry report, shared films, disagreement, first date film.</div></a>
+  <a href="07-chat.html"><div class="screen-num">screen VII</div><div class="screen-name">Chat</div><div class="screen-desc">First date film pinned, conversation with live input.</div></a>
+  <a href="08-soul-siblings.html"><div class="screen-num">screen VIII</div><div class="screen-name">Soul Siblings</div><div class="screen-desc">Taste-compatible community, no romantic framing.</div></a>
+</div>
+</body>
+</html>

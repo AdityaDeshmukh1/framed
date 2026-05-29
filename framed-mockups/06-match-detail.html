@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Framed · Match Detail</title>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500;1,600&family=DM+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --cream: #FAEEDA; --cream-2: #F5E1B8; --ink: #2C2C2A;
+    --coral: #D85A30; --coral-deep: #4A1B0C; --coral-darker: #3A1A0E;
+    --teal: #1D9E75; --amber: #EF9F27; --blue: #185FA5;
+    --serif: 'Cormorant Garamond', Georgia, serif;
+    --sans: 'DM Sans', system-ui, sans-serif;
+    --mono: 'JetBrains Mono', monospace;
+  }
+  html, body { min-height: 100vh; background: var(--coral-darker); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+  .page { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px 16px; }
+  .phone { width: 100%; max-width: 380px; background: var(--cream); border-radius: 28px; border: 1.5px solid var(--coral-deep); overflow: hidden; color: var(--ink); box-shadow: 0 0 0 6px var(--cream), 0 0 0 8px var(--coral-deep), 0 30px 60px -20px rgba(0,0,0,0.6); }
+  .status { display: flex; justify-content: space-between; padding: 14px 22px 10px; font-family: var(--serif); font-style: italic; font-size: 12px; letter-spacing: .05em; color: var(--coral-deep); }
+  .rule { border-top: 1px solid var(--coral-deep); border-bottom: 1px solid var(--coral-deep); height: 3px; margin: 0 16px; }
+  .rule-thin { height: 0; border-top: .5px solid var(--coral-deep); margin: 10px 22px; }
+  .app-bar { display: flex; justify-content: space-between; align-items: center; padding: 4px 22px 14px; font-family: var(--serif); color: var(--coral-deep); font-size: 14px; }
+
+  .chapter { text-align: center; padding: 14px 22px 12px; }
+  .kicker { font-family: var(--sans); font-size: 9px; letter-spacing: .22em; color: var(--coral-deep); text-transform: lowercase; margin-bottom: 6px; }
+  .names { font-family: var(--serif); font-size: 22px; font-weight: 500; color: var(--coral-deep); margin-bottom: 4px; }
+  .score-line { font-family: var(--serif); font-style: italic; font-size: 13px; color: var(--coral); }
+
+  .section { padding: 8px 22px; }
+  .section-label { font-family: var(--sans); font-size: 9px; letter-spacing: .22em; color: var(--coral-deep); text-transform: lowercase; margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }
+  .section-label::before, .section-label::after { content: ""; flex: 1; height: .5px; background: var(--coral-deep); opacity: .4; }
+
+  .blurb { font-family: var(--serif); font-style: italic; font-size: 14px; line-height: 1.6; color: var(--ink); text-align: justify; }
+
+  .films-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; }
+  .poster { aspect-ratio: 2/3; display: flex; flex-direction: column; justify-content: flex-end; color: var(--cream); border: .5px solid var(--coral-deep); overflow: hidden; }
+  .poster-meta { padding: 5px 5px 6px; background: linear-gradient(to top, rgba(0,0,0,.82) 0%, transparent 100%); }
+  .poster .yr { font-family: var(--mono); font-size: 8px; letter-spacing: .12em; opacity: .85; }
+  .poster .tt { font-family: var(--serif); font-size: 10px; line-height: 1.1; font-weight: 500; }
+
+  .disagreement { display: flex; gap: 12px; align-items: center; padding: 10px 12px; background: var(--cream-2); border: .5px solid var(--coral-deep); }
+  .dis-poster { width: 44px; aspect-ratio: 2/3; flex-shrink: 0; display: flex; flex-direction: column; justify-content: flex-end; color: var(--cream); border: .5px solid var(--coral-deep); }
+  .dis-poster .dp-meta { padding: 3px 4px; background: linear-gradient(to top, rgba(0,0,0,.8) 0%, transparent 100%); }
+  .dis-poster .dp-yr { font-family: var(--mono); font-size: 7px; opacity: .8; }
+  .dis-poster .dp-tt { font-family: var(--serif); font-size: 8px; line-height: 1.1; }
+  .dis-text { font-family: var(--serif); font-size: 13px; line-height: 1.45; }
+  .dis-text .clash { color: var(--coral); font-style: italic; display: block; margin-top: 3px; font-size: 12px; }
+
+  .first-date { background: var(--amber); padding: 14px 16px; margin: 0 22px; border: .5px solid var(--coral-deep); text-align: center; }
+  .fd-label { font-family: var(--sans); font-size: 9px; letter-spacing: .2em; color: var(--amber-deep, #412402); text-transform: lowercase; margin-bottom: 6px; }
+  .fd-title { font-family: var(--serif); font-size: 18px; font-weight: 500; color: var(--coral-deep); line-height: 1.2; }
+  .fd-sub { font-family: var(--serif); font-style: italic; font-size: 11px; color: var(--coral-deep); margin-top: 4px; opacity: .85; }
+
+  .actions { display: grid; grid-template-columns: 1fr 1.6fr; gap: 10px; padding: 14px 22px 24px; }
+  .btn { padding: 13px; font-family: var(--serif); font-size: 14px; border: 1px solid var(--coral-deep); cursor: pointer; text-align: center; transition: all .15s; }
+  .btn-ghost { background: transparent; color: var(--coral-deep); }
+  .btn-ghost:hover { background: var(--coral-deep); color: var(--cream); }
+  .btn-primary { background: var(--coral); color: var(--cream); }
+  .btn-primary:hover { background: var(--coral-deep); }
+
+  .diamond { text-align: center; color: var(--coral-deep); font-family: var(--serif); font-size: 11px; letter-spacing: .6em; margin: 8px 0; }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="phone">
+    <div class="status"><span>← back</span><span>chemistry</span></div>
+    <div class="rule"></div>
+
+    <div class="chapter">
+      <div class="kicker">a chemistry of</div>
+      <div class="names">Aditya × Maya</div>
+      <div class="score-line">87% taste alignment</div>
+    </div>
+
+    <div class="rule"></div>
+
+    <div class="section">
+      <div class="section-label">why you'd click</div>
+      <p class="blurb">You both find beauty in slow cinema and revere the same handful of difficult women directors. She'd push you toward melodrama you'd resist and probably love. You'd give her the noir she's been missing.</p>
+    </div>
+
+    <div class="rule-thin"></div>
+
+    <div class="section">
+      <div class="section-label">films you both adore</div>
+      <div class="films-grid">
+        <div class="poster" style="background:#1D9E75;"><div class="poster-meta"><div class="yr">2000</div><div class="tt">In the Mood for Love</div></div></div>
+        <div class="poster" style="background:#4A1B0C;"><div class="poster-meta"><div class="yr">2001</div><div class="tt">Mulholland Drive</div></div></div>
+        <div class="poster" style="background:#185FA5;"><div class="poster-meta"><div class="yr">1975</div><div class="tt">Jeanne Dielman</div></div></div>
+      </div>
+    </div>
+
+    <div class="rule-thin"></div>
+
+    <div class="section">
+      <div class="section-label">the productive disagreement</div>
+      <div class="disagreement">
+        <div class="dis-poster" style="background:#EF9F27;">
+          <div class="dp-meta" style="color:#412402;background:linear-gradient(to top, rgba(0,0,0,.4) 0%, transparent 100%);color:#fff;">
+            <div class="dp-yr">2022</div>
+            <div class="dp-tt">Babylon</div>
+          </div>
+        </div>
+        <div class="dis-text">
+          You: 2★ &nbsp;·&nbsp; Her: 5★
+          <span class="clash">worth the conversation.</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="rule-thin"></div>
+
+    <div class="first-date">
+      <div class="fd-label">your first date film</div>
+      <div class="fd-title">A Brighter Summer Day</div>
+      <div class="fd-sub">neither of you have seen it. you both will.</div>
+    </div>
+
+    <div class="diamond">· ◆ ·</div>
+
+    <div class="actions">
+      <div class="btn btn-ghost">pass ✕</div>
+      <div class="btn btn-primary">say hello →</div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Framed · Match Feed</title>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500;1,600&family=DM+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --cream: #FAEEDA; --cream-2: #F5E1B8; --ink: #2C2C2A;
+    --coral: #D85A30; --coral-deep: #4A1B0C; --coral-darker: #3A1A0E;
+    --teal: #1D9E75; --amber: #EF9F27; --blue: #185FA5;
+    --serif: 'Cormorant Garamond', Georgia, serif;
+    --sans: 'DM Sans', system-ui, sans-serif;
+    --mono: 'JetBrains Mono', monospace;
+  }
+  html, body { min-height: 100vh; background: var(--coral-darker); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+  .page { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px 16px; }
+  .phone { width: 100%; max-width: 380px; background: var(--cream); border-radius: 28px; border: 1.5px solid var(--coral-deep); overflow: hidden; color: var(--ink); box-shadow: 0 0 0 6px var(--cream), 0 0 0 8px var(--coral-deep), 0 30px 60px -20px rgba(0,0,0,0.6); }
+  .status { display: flex; justify-content: space-between; padding: 14px 22px 10px; font-family: var(--serif); font-style: italic; font-size: 12px; letter-spacing: .05em; color: var(--coral-deep); }
+  .rule { border-top: 1px solid var(--coral-deep); border-bottom: 1px solid var(--coral-deep); height: 3px; margin: 0 16px; }
+  .rule-thin { height: 0; border-top: .5px solid var(--coral-deep); margin: 10px 22px; }
+
+  .app-bar { display: flex; justify-content: space-between; align-items: center; padding: 4px 22px 14px; font-family: var(--serif); }
+  .logo { font-size: 22px; font-weight: 600; color: var(--coral-deep); letter-spacing: .02em; }
+  .app-bar-right { font-size: 18px; color: var(--coral-deep); cursor: pointer; }
+
+  .section-header { display: flex; justify-content: space-between; align-items: center; padding: 0 22px 10px; }
+  .section-title { font-family: var(--sans); font-size: 9px; letter-spacing: .22em; color: var(--coral-deep); text-transform: lowercase; }
+  .section-count { font-family: var(--mono); font-size: 10px; color: var(--coral); }
+
+  /* match cards */
+  .matches { padding: 0 14px; display: flex; flex-direction: column; gap: 10px; }
+  .match-card { border: .5px solid var(--coral-deep); overflow: hidden; cursor: pointer; transition: transform .15s; }
+  .match-card:hover { transform: translateY(-2px); }
+
+  .match-card .card-header { padding: 12px 14px 10px; }
+  .match-card .name-row { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px; }
+  .match-card .m-name { font-family: var(--serif); font-size: 22px; font-weight: 500; color: var(--ink); }
+  .match-card .m-score { font-family: var(--serif); font-size: 20px; color: var(--coral); }
+  .match-card .m-meta { font-family: var(--serif); font-style: italic; font-size: 11px; color: var(--coral-deep); margin-bottom: 8px; }
+  .match-card .m-blurb { font-family: var(--serif); font-style: italic; font-size: 13px; color: var(--ink); line-height: 1.45; }
+
+  .match-card .card-films { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0; border-top: .5px solid var(--coral-deep); }
+  .mini-poster { aspect-ratio: 2/3; display: flex; flex-direction: column; justify-content: flex-end; color: var(--cream); border-right: .5px solid var(--coral-deep); }
+  .mini-poster:last-child { border-right: none; }
+  .mini-poster .mp-meta { padding: 3px 4px 4px; background: linear-gradient(to top, rgba(0,0,0,.8) 0%, transparent 100%); }
+  .mini-poster .mp-yr { font-family: var(--mono); font-size: 7px; letter-spacing: .1em; opacity: .8; }
+  .mini-poster .mp-tt { font-family: var(--serif); font-size: 8px; line-height: 1.1; }
+
+  .match-card .card-actions { display: grid; grid-template-columns: 1fr 1fr; }
+  .ca-btn { padding: 11px; text-align: center; font-family: var(--serif); font-size: 13px; cursor: pointer; border-top: .5px solid var(--coral-deep); transition: all .15s; }
+  .ca-pass { color: var(--coral-deep); border-right: .5px solid var(--coral-deep); }
+  .ca-pass:hover { background: var(--coral-deep); color: var(--cream); }
+  .ca-like { background: var(--coral); color: var(--cream); }
+  .ca-like:hover { background: var(--coral-deep); }
+
+  /* nav */
+  .nav { display: flex; justify-content: space-around; padding: 12px 0 20px; margin: 10px 22px 0; border-top: .5px solid var(--coral-deep); font-size: 9px; letter-spacing: .12em; font-family: var(--serif); color: var(--coral-deep); }
+  .nav .active { color: var(--coral); }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="phone">
+    <div class="status"><span>9:41</span><span>↻ updated</span></div>
+    <div class="rule"></div>
+    <div class="app-bar">
+      <div class="logo">Framed</div>
+      <div class="app-bar-right">⚙</div>
+    </div>
+
+    <div class="section-header">
+      <div class="section-title">now showing · your matches</div>
+      <div class="section-count">12 new</div>
+    </div>
+
+    <div class="matches">
+      <!-- match 1 -->
+      <div class="match-card">
+        <div class="card-header" style="background:#F5E1B8;">
+          <div class="name-row">
+            <div class="m-name">Maya, 26</div>
+            <div class="m-score">87%</div>
+          </div>
+          <div class="m-meta">brooklyn · ~2 km</div>
+          <div class="m-blurb">"You both find beauty in slow cinema. She'd push you toward melodrama you'd resist and probably love."</div>
+        </div>
+        <div class="card-films">
+          <div class="mini-poster" style="background:#1D9E75;"><div class="mp-meta"><div class="mp-yr">2000</div><div class="mp-tt">In the Mood</div></div></div>
+          <div class="mini-poster" style="background:#2C2C2A;"><div class="mp-meta"><div class="mp-yr">1979</div><div class="mp-tt">Stalker</div></div></div>
+          <div class="mini-poster" style="background:#D85A30;"><div class="mp-meta"><div class="mp-yr">1999</div><div class="mp-tt">Beau Travail</div></div></div>
+          <div class="mini-poster" style="background:#185FA5;"><div class="mp-meta"><div class="mp-yr">1975</div><div class="mp-tt">Jeanne Dielman</div></div></div>
+        </div>
+        <div class="card-actions">
+          <div class="ca-btn ca-pass">pass ✕</div>
+          <div class="ca-btn ca-like">encore ♥</div>
+        </div>
+      </div>
+
+      <!-- match 2 -->
+      <div class="match-card">
+        <div class="card-header">
+          <div class="name-row">
+            <div class="m-name">Priya, 28</div>
+            <div class="m-score">81%</div>
+          </div>
+          <div class="m-meta">mumbai · global match</div>
+          <div class="m-blurb">"Shared obsession with Satyajit Ray. You'd disagree about everything after 1980 and enjoy every minute."</div>
+        </div>
+        <div class="card-films">
+          <div class="mini-poster" style="background:#EF9F27;color:#412402;"><div class="mp-meta" style="background:linear-gradient(to top, rgba(0,0,0,.5) 0%, transparent 100%);color:#fff"><div class="mp-yr">1955</div><div class="mp-tt">Pather Panchali</div></div></div>
+          <div class="mini-poster" style="background:#4A1B0C;"><div class="mp-meta"><div class="mp-yr">1960</div><div class="mp-tt">The World of Apu</div></div></div>
+          <div class="mini-poster" style="background:#1D9E75;"><div class="mp-meta"><div class="mp-yr">2001</div><div class="mp-tt">Mulholland Dr.</div></div></div>
+          <div class="mini-poster" style="background:#2C2C2A;"><div class="mp-meta"><div class="mp-yr">1963</div><div class="mp-tt">8½</div></div></div>
+        </div>
+        <div class="card-actions">
+          <div class="ca-btn ca-pass">pass ✕</div>
+          <div class="ca-btn ca-like">encore ♥</div>
+        </div>
+      </div>
+
+      <!-- match 3 — compact -->
+      <div class="match-card">
+        <div class="card-header" style="background:#F5E1B8;">
+          <div class="name-row">
+            <div class="m-name">Leila, 25</div>
+            <div class="m-score">78%</div>
+          </div>
+          <div class="m-meta">paris · global match</div>
+          <div class="m-blurb">"Both gave Céline and Julie Go Boating 5 stars. That's already more than most people have in common."</div>
+        </div>
+        <div class="card-films">
+          <div class="mini-poster" style="background:#185FA5;"><div class="mp-meta"><div class="mp-yr">1974</div><div class="mp-tt">Céline & Julie</div></div></div>
+          <div class="mini-poster" style="background:#D85A30;"><div class="mp-meta"><div class="mp-yr">2022</div><div class="mp-tt">Armageddon Time</div></div></div>
+          <div class="mini-poster" style="background:#2C2C2A;"><div class="mp-meta"><div class="mp-yr">2018</div><div class="mp-tt">Burning</div></div></div>
+          <div class="mini-poster" style="background:#1D9E75;"><div class="mp-meta"><div class="mp-yr">1967</div><div class="mp-tt">Weekend</div></div></div>
+        </div>
+        <div class="card-actions">
+          <div class="ca-btn ca-pass">pass ✕</div>
+          <div class="ca-btn ca-like">encore ♥</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="nav">
+      <span>portrait</span>
+      <span class="active">discover</span>
+      <span>matches</span>
+      <span>chat</span>
+    </div>
+  </div>
+</div>
+</body>
+</html>

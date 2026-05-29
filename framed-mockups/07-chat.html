@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Framed · Chat</title>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500;1,600&family=DM+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --cream: #FAEEDA; --cream-2: #F5E1B8; --ink: #2C2C2A;
+    --coral: #D85A30; --coral-deep: #4A1B0C; --coral-darker: #3A1A0E;
+    --teal: #1D9E75; --teal-deep: #04342C; --amber: #EF9F27;
+    --serif: 'Cormorant Garamond', Georgia, serif;
+    --sans: 'DM Sans', system-ui, sans-serif;
+    --mono: 'JetBrains Mono', monospace;
+  }
+  html, body { min-height: 100vh; background: var(--coral-darker); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+  .page { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px 16px; }
+  .phone { width: 100%; max-width: 380px; background: var(--cream); border-radius: 28px; border: 1.5px solid var(--coral-deep); overflow: hidden; color: var(--ink); box-shadow: 0 0 0 6px var(--cream), 0 0 0 8px var(--coral-deep), 0 30px 60px -20px rgba(0,0,0,0.6); }
+  .status { display: flex; justify-content: space-between; padding: 14px 22px 10px; font-family: var(--serif); font-style: italic; font-size: 12px; letter-spacing: .05em; color: var(--coral-deep); }
+  .rule { border-top: 1px solid var(--coral-deep); border-bottom: 1px solid var(--coral-deep); height: 3px; margin: 0 16px; }
+  .rule-thin { height: 0; border-top: .5px solid var(--coral-deep); margin: 10px 22px; }
+
+  .chat-header { display: flex; align-items: center; justify-content: space-between; padding: 8px 22px 14px; }
+  .ch-back { font-family: var(--serif); font-size: 16px; color: var(--coral-deep); cursor: pointer; }
+  .ch-name { font-family: var(--serif); font-size: 18px; font-weight: 500; color: var(--coral-deep); }
+  .ch-score { font-family: var(--mono); font-size: 11px; color: var(--coral); }
+
+  /* pinned first date film */
+  .first-date-pin { background: var(--ink); color: var(--cream); padding: 10px 14px; margin: 0 14px; border: .5px solid var(--coral-deep); display: flex; gap: 10px; align-items: center; }
+  .fd-poster { width: 32px; height: 48px; background: var(--teal); flex-shrink: 0; border: .5px solid var(--cream); display: flex; align-items: center; justify-content: center; }
+  .fd-info { flex: 1; min-width: 0; }
+  .fd-label { font-family: var(--sans); font-size: 8px; letter-spacing: .18em; color: var(--amber); text-transform: lowercase; margin-bottom: 3px; }
+  .fd-title { font-family: var(--serif); font-size: 13px; line-height: 1.2; }
+  .fd-sub { font-family: var(--serif); font-style: italic; font-size: 9px; margin-top: 2px; opacity: .8; }
+  .fd-where { font-family: var(--serif); font-size: 10px; text-decoration: underline; cursor: pointer; flex-shrink: 0; }
+
+  @keyframes blink { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.5;transform:scale(1.3)} }
+  .rec-dot { display: inline-block; width: 6px; height: 6px; background: var(--coral); border-radius: 50%; animation: blink 2s infinite; margin-right: 4px; }
+
+  /* messages */
+  .messages { padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; min-height: 240px; }
+  .bub { max-width: 80%; padding: 9px 12px; }
+  .bub-l { align-self: flex-start; background: var(--cream-2); border: .5px solid var(--coral-deep); }
+  .bub-r { align-self: flex-end; background: var(--coral); color: var(--cream); border: .5px solid var(--coral-deep); }
+  .bub p { font-family: var(--serif); font-style: italic; font-size: 13px; line-height: 1.45; }
+  .typing { align-self: flex-start; font-family: var(--serif); font-style: italic; font-size: 11px; color: var(--coral-deep); opacity: .7; }
+
+  /* input */
+  .chat-input { padding: 10px 14px 24px; border-top: .5px solid var(--coral-deep); display: flex; gap: 8px; align-items: center; margin-top: 6px; }
+  .inp { flex: 1; background: var(--cream-2); border: .5px solid var(--coral-deep); padding: 10px 12px; font-family: var(--serif); font-style: italic; font-size: 13px; color: var(--ink); outline: none; }
+  .inp::placeholder { color: #aaa; }
+  .send-btn { width: 40px; height: 40px; background: var(--coral); color: var(--cream); border: .5px solid var(--coral-deep); display: flex; align-items: center; justify-content: center; font-family: var(--serif); font-size: 17px; cursor: pointer; flex-shrink: 0; transition: background .15s; }
+  .send-btn:hover { background: var(--coral-deep); }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="phone">
+    <div class="status"><span>← back</span><span>Maya</span></div>
+    <div class="rule"></div>
+
+    <div class="chat-header">
+      <div class="ch-back">←</div>
+      <div>
+        <div class="ch-name">Maya, 26</div>
+      </div>
+      <div class="ch-score">87%</div>
+    </div>
+
+    <!-- pinned first date film -->
+    <div class="first-date-pin">
+      <div class="fd-poster"></div>
+      <div class="fd-info">
+        <div class="fd-label"><span class="rec-dot"></span>first date film</div>
+        <div class="fd-title">A Brighter Summer Day</div>
+        <div class="fd-sub">edward yang · 1991 · 4h 0m</div>
+      </div>
+      <div class="fd-where">where ↗</div>
+    </div>
+
+    <div class="rule-thin"></div>
+
+    <div class="messages">
+      <div class="bub bub-l"><p>ok but if we're doing 4 hours of taiwanese new wave i need to know your stance on hou hsiao-hsien first</p></div>
+      <div class="bub bub-r"><p>flowers of shanghai is a perfect film and i won't be taking questions</p></div>
+      <div class="bub bub-l"><p>oh we're getting married</p></div>
+      <div class="bub bub-r"><p>i mean. not until you've defended your millennium mambo take</p></div>
+      <div class="typing">— typing —</div>
+    </div>
+
+    <div class="chat-input">
+      <input class="inp" placeholder="type your line..." id="msg-input">
+      <div class="send-btn" id="send-btn">↑</div>
+    </div>
+  </div>
+</div>
+
+<script>
+  const input = document.getElementById('msg-input');
+  const send = document.getElementById('send-btn');
+  const messages = document.querySelector('.messages');
+
+  function sendMessage() {
+    const text = input.value.trim();
+    if (!text) return;
+    const bub = document.createElement('div');
+    bub.className = 'bub bub-r';
+    bub.innerHTML = `<p>${text}</p>`;
+    const typing = messages.querySelector('.typing');
+    messages.insertBefore(bub, typing);
+    input.value = '';
+    messages.scrollTop = messages.scrollHeight;
+  }
+
+  send.addEventListener('click', sendMessage);
+  input.addEventListener('keydown', e => { if (e.key === 'Enter') sendMessage(); });
+</script>
+</body>
+</html>
