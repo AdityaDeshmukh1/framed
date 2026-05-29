@@ -3,17 +3,16 @@ package handlers
 import (
 	"log"
 	"strings"
+	"time"
 
 	"github.com/framed-app/api/internal/llm"
 	"github.com/gofiber/fiber/v2"
+	"github.com/jackc/pgx/v5"
 )
 
-// Soul generates a Cinematic Soul portrait for a user and stores it in soul_portraits.
+// Soul generates a Cinematic Soul portrait for the authenticated user.
 func (h *Handlers) Soul(c *fiber.Ctx) error {
-	userID := c.Params("user_id")
-	if userID == "" {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "user_id is required"})
-	}
+	userID, _ := c.Locals("userID").(string)
 
 	log.Printf("[soul] generating portrait for user=%s", userID)
 
@@ -97,6 +96,29 @@ func (h *Handlers) fetchFilmTitles(c *fiber.Ctx, userID, query string) ([]string
 		titles = append(titles, t)
 	}
 	return titles, rows.Err()
+}
+
+// GetSoul fetches an existing soul portrait for the authenticated user.
+func (h *Handlers) GetSoul(c *fiber.Ctx) error {
+	userID, _ := c.Locals("userID").(string)
+
+	var portrait, summaryLine string
+	var computedAt time.Time
+	err := h.pool.QueryRow(c.Context(),
+		`SELECT portrait_text, summary_line, computed_at FROM soul_portraits WHERE user_id = $1`,
+		userID).Scan(&portrait, &summaryLine, &computedAt)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "portrait not found"})
+		}
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to fetch portrait"})
+	}
+
+	return c.JSON(fiber.Map{
+		"portrait":     portrait,
+		"summary_line": summaryLine,
+		"computed_at":  computedAt,
+	})
 }
 
 // firstSentence returns the text up to and including the first sentence-ending punctuation.

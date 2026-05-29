@@ -28,7 +28,7 @@ func main() {
 
 	switch *job {
 	case "scrape":
-		t, err := jobs.NewScrapeProfileTask(*userID, *handle)
+		t, err := jobs.NewScrapeProfileTask("", *userID, *handle) // no jobID when enqueuing manually
 		if err != nil {
 			log.Fatalf("create task: %v", err)
 		}

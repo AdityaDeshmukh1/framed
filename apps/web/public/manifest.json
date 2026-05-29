@@ -1,0 +1,17 @@
+{
+  "name": "Framed",
+  "short_name": "Framed",
+  "description": "A film about you. Your cinema. Your character. Your match.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#FAEEDA",
+  "theme_color": "#4A1B0C",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/favicon.ico",
+      "sizes": "any",
+      "type": "image/x-icon"
+    }
+  ]
+}

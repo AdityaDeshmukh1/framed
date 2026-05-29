@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Framed · Onboarding</title>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500;1,600&family=DM+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --cream: #FAEEDA; --cream-2: #F5E1B8; --ink: #2C2C2A;
+    --coral: #D85A30; --coral-deep: #4A1B0C; --coral-darker: #3A1A0E;
+    --serif: 'Cormorant Garamond', Georgia, serif;
+    --sans: 'DM Sans', system-ui, sans-serif;
+    --mono: 'JetBrains Mono', monospace;
+  }
+  html, body { min-height: 100vh; background: var(--coral-darker); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+  body { background-image: radial-gradient(circle at 20% 30%, rgba(216,90,48,0.12) 0%, transparent 50%); }
+  .page { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px 16px; }
+  .phone { width: 100%; max-width: 380px; background: var(--cream); border-radius: 28px; border: 1.5px solid var(--coral-deep); overflow: hidden; color: var(--ink); box-shadow: 0 0 0 6px var(--cream), 0 0 0 8px var(--coral-deep), 0 30px 60px -20px rgba(0,0,0,0.6); }
+  .status { display: flex; justify-content: space-between; padding: 14px 22px 10px; font-family: var(--serif); font-style: italic; font-size: 12px; letter-spacing: .05em; color: var(--coral-deep); }
+  .rule { border-top: 1px solid var(--coral-deep); border-bottom: 1px solid var(--coral-deep); height: 3px; margin: 0 16px; }
+  .rule-thin { height: 0; border-top: .5px solid var(--coral-deep); margin: 14px 22px; }
+
+  .step-header { display: flex; justify-content: space-between; align-items: center; padding: 14px 22px 0; }
+  .step-label { font-family: var(--sans); font-size: 9px; letter-spacing: .2em; color: var(--coral-deep); text-transform: lowercase; }
+  .step-dots { display: flex; gap: 5px; }
+  .dot { width: 20px; height: 3px; background: var(--cream-2); border: .5px solid var(--coral-deep); }
+  .dot.active { background: var(--coral); }
+
+  .chapter { text-align: center; padding: 20px 22px 16px; }
+  .chapter .kicker { font-family: var(--sans); font-size: 9px; letter-spacing: .22em; color: var(--coral-deep); text-transform: lowercase; margin-bottom: 8px; }
+  .chapter .title { font-family: var(--serif); font-size: 28px; font-weight: 500; color: var(--coral-deep); line-height: 1.1; margin-bottom: 8px; }
+  .chapter .sub { font-family: var(--serif); font-style: italic; font-size: 13px; color: var(--ink); line-height: 1.5; }
+
+  .form-section { padding: 8px 22px 0; }
+  .field-label { font-family: var(--sans); font-size: 9px; letter-spacing: .2em; color: var(--coral-deep); text-transform: lowercase; margin-bottom: 8px; }
+
+  .input-wrap { position: relative; }
+  .url-prefix { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); font-family: var(--mono); font-size: 11px; color: var(--coral-deep); opacity: .6; pointer-events: none; }
+  .inp { width: 100%; background: var(--cream-2); border: 1px solid var(--coral-deep); padding: 12px 12px 12px 130px; font-family: var(--mono); font-size: 13px; color: var(--ink); outline: none; transition: border-color .15s; }
+  .inp:focus { border-color: var(--coral); }
+  .inp::placeholder { color: #aaa; }
+
+  .hint { font-family: var(--serif); font-style: italic; font-size: 11px; color: var(--coral-deep); margin-top: 8px; opacity: .7; }
+
+  .example { background: var(--cream-2); border: .5px solid var(--coral-deep); padding: 10px 14px; margin-top: 14px; }
+  .example .ex-label { font-family: var(--sans); font-size: 8px; letter-spacing: .18em; color: var(--coral-deep); text-transform: lowercase; margin-bottom: 6px; }
+  .example .ex-handle { font-family: var(--mono); font-size: 11px; color: var(--ink); }
+  .example .ex-sub { font-family: var(--serif); font-style: italic; font-size: 11px; color: var(--coral-deep); margin-top: 2px; opacity: .8; }
+
+  .actions { padding: 18px 22px 28px; display: flex; flex-direction: column; gap: 10px; }
+  .btn-primary { background: var(--coral); color: var(--cream); padding: 14px; text-align: center; font-family: var(--serif); font-size: 15px; border: 1px solid var(--coral-deep); cursor: pointer; letter-spacing: .04em; transition: background .15s; }
+  .btn-primary:hover { background: var(--coral-deep); }
+  .btn-secondary { background: transparent; color: var(--coral-deep); padding: 12px; text-align: center; font-family: var(--serif); font-style: italic; font-size: 13px; border: .5px solid var(--coral-deep); cursor: pointer; }
+
+  .diamond { text-align: center; color: var(--coral-deep); font-family: var(--serif); font-size: 11px; letter-spacing: .6em; margin: 4px 0; }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="phone">
+    <div class="status"><span>9:41</span><span>framed</span></div>
+    <div class="rule"></div>
+
+    <div class="step-header">
+      <div class="step-label">step one of three</div>
+      <div class="step-dots">
+        <div class="dot active"></div>
+        <div class="dot"></div>
+        <div class="dot"></div>
+      </div>
+    </div>
+
+    <div class="chapter">
+      <div class="kicker">the import</div>
+      <div class="title">Bring your watchlist.<br>We'll do the rest.</div>
+      <div class="sub">We read your Letterboxd history so you don't have to explain yourself.</div>
+    </div>
+
+    <div class="rule-thin"></div>
+
+    <div class="form-section">
+      <div class="field-label">your letterboxd username</div>
+      <div class="input-wrap">
+        <div class="url-prefix">letterboxd.com/</div>
+        <input class="inp" type="text" placeholder="username" id="handle-input">
+      </div>
+      <div class="hint">public profiles only — we import, then forget the handle.</div>
+
+      <div class="example">
+        <div class="ex-label">for example</div>
+        <div class="ex-handle">letterboxd.com/adityadeshmukh</div>
+        <div class="ex-sub">412 films · .78 obscurity · 3.4★ avg</div>
+      </div>
+    </div>
+
+    <div class="diamond" style="margin-top:16px;">· ◆ ·</div>
+
+    <div class="actions">
+      <div class="btn-primary" id="import-btn">import my reels →</div>
+      <div class="btn-secondary">I don't have Letterboxd — rate films instead</div>
+    </div>
+  </div>
+</div>
+
+<script>
+  const input = document.getElementById('handle-input');
+  const btn = document.getElementById('import-btn');
+  btn.addEventListener('click', () => {
+    if (input.value.trim()) {
+      btn.textContent = 'importing...';
+      btn.style.opacity = '.7';
+      btn.style.cursor = 'default';
+      setTimeout(() => { window.location.href = '03-portrait-reveal.html'; }, 1200);
+    }
+  });
+  input.addEventListener('keydown', e => { if (e.key === 'Enter') btn.click(); });
+</script>
+</body>
+</html>

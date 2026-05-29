@@ -8,8 +8,9 @@ import (
 	"github.com/hibiken/asynq"
 )
 
-func NewScrapeProfileTask(userID, handle string) (*asynq.Task, error) {
+func NewScrapeProfileTask(jobID, userID, handle string) (*asynq.Task, error) {
 	payload := models.ScrapeProfilePayload{
+		JobID:            jobID,
 		UserID:           userID,
 		LetterboxdHandle: handle,
 	}
@@ -35,11 +36,12 @@ func NewComputeVectorTask(userID string) (*asynq.Task, error) {
 	return asynq.NewTask(string(models.JobTypeComputeVector), bytes), nil
 }
 
-func NewEnrichFilmTask(filmID string, tmdbID int, slug string) (*asynq.Task, error) {
+func NewEnrichFilmTask(filmID string, tmdbID int, slug, jobID string) (*asynq.Task, error) {
 	payload := models.EnrichFilmPayload{
 		FilmID:         filmID,
 		TMDBMovieID:    tmdbID,
 		LetterboxdSlug: slug,
+		JobID:          jobID,
 	}
 
 	bytes, err := json.Marshal(payload)

@@ -1,0 +1,746 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Frame · Maya's Profile</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500;1,600&family=DM+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --cream:        #FAEEDA;
+    --cream-2:      #F5E1B8;
+    --ink:          #2C2C2A;
+    --ink-deep:     #1A1817;
+    --coral:        #D85A30;
+    --coral-deep:   #4A1B0C;
+    --coral-darker: #3A1A0E;
+    --teal:         #1D9E75;
+    --teal-deep:    #04342C;
+    --amber:        #EF9F27;
+    --amber-deep:   #412402;
+    --blue:         #185FA5;
+    --serif:        'Cormorant Garamond', Georgia, serif;
+    --sans:         'DM Sans', system-ui, -apple-system, sans-serif;
+    --mono:         'JetBrains Mono', monospace;
+  }
+
+  html, body {
+    min-height: 100vh;
+    font-family: var(--sans);
+    background: var(--coral-darker);
+    color: var(--ink);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* dark cinema-curtain background with a subtle tile pattern */
+  body {
+    background-image:
+      radial-gradient(circle at 20% 30%, rgba(216, 90, 48, 0.08) 0%, transparent 50%),
+      radial-gradient(circle at 80% 70%, rgba(239, 159, 39, 0.06) 0%, transparent 50%);
+    background-color: var(--coral-darker);
+  }
+
+  .page {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px 16px 48px;
+  }
+
+  /* phone screen container */
+  .phone {
+    width: 100%;
+    max-width: 380px;
+    background: var(--cream);
+    border-radius: 28px;
+    border: 1.5px solid var(--coral-deep);
+    overflow: hidden;
+    position: relative;
+    box-shadow:
+      0 0 0 6px var(--cream),
+      0 0 0 8px var(--coral-deep),
+      0 30px 60px -20px rgba(0,0,0,0.5);
+  }
+
+  /* status bar */
+  .status {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 14px 22px 10px;
+    font-family: var(--serif);
+    font-style: italic;
+    font-size: 12px;
+    letter-spacing: 0.05em;
+    color: var(--coral-deep);
+  }
+  .status .dot { display: inline-block; width: 4px; height: 4px; border-radius: 50%; background: var(--coral-deep); margin: 0 4px 2px; }
+
+  /* top app bar */
+  .app-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 4px 20px 14px;
+    font-family: var(--serif);
+  }
+  .app-bar .back {
+    font-size: 16px;
+    color: var(--coral-deep);
+    cursor: pointer;
+    transition: opacity 0.15s;
+  }
+  .app-bar .back:hover { opacity: 0.6; }
+  .app-bar .logo {
+    font-size: 22px;
+    font-weight: 600;
+    color: var(--coral-deep);
+    letter-spacing: 0.02em;
+  }
+  .app-bar .menu {
+    font-size: 18px;
+    color: var(--coral-deep);
+    cursor: pointer;
+    line-height: 1;
+    transition: opacity 0.15s;
+  }
+  .app-bar .menu:hover { opacity: 0.6; }
+
+  /* double rule decorative element — Wes Anderson signature */
+  .rule {
+    border-top: 1px solid var(--coral-deep);
+    border-bottom: 1px solid var(--coral-deep);
+    height: 3px;
+    margin: 0 16px;
+  }
+  .rule-thin {
+    height: 0;
+    border-top: 0.5px solid var(--coral-deep);
+    margin: 14px 22px;
+  }
+  .rule-diamond {
+    text-align: center;
+    color: var(--coral-deep);
+    font-family: var(--serif);
+    font-size: 11px;
+    letter-spacing: 0.6em;
+    margin: 8px 0;
+  }
+
+  /* chapter card — the name header */
+  .chapter {
+    text-align: center;
+    padding: 22px 20px 18px;
+  }
+  .chapter .kicker {
+    font-family: var(--sans);
+    font-size: 9px;
+    letter-spacing: 0.22em;
+    color: var(--coral-deep);
+    text-transform: lowercase;
+    margin-bottom: 8px;
+  }
+  .chapter .name {
+    font-family: var(--serif);
+    font-size: 38px;
+    font-weight: 500;
+    line-height: 1;
+    color: var(--coral-deep);
+    margin-bottom: 6px;
+  }
+  .chapter .name .age {
+    font-style: italic;
+    font-weight: 400;
+    color: var(--ink);
+  }
+  .chapter .meta {
+    font-family: var(--serif);
+    font-style: italic;
+    font-size: 13px;
+    color: var(--ink);
+    letter-spacing: 0.03em;
+  }
+  .chapter .meta .sep {
+    margin: 0 6px;
+    color: var(--coral);
+  }
+
+  /* generic section wrapper */
+  .section {
+    padding: 16px 22px;
+  }
+  .section-label {
+    font-family: var(--sans);
+    font-size: 9px;
+    letter-spacing: 0.22em;
+    color: var(--coral-deep);
+    text-transform: lowercase;
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .section-label::before,
+  .section-label::after {
+    content: "";
+    flex: 1;
+    height: 0.5px;
+    background: var(--coral-deep);
+    opacity: 0.4;
+  }
+
+  /* cinematic soul */
+  .soul {
+    font-family: var(--serif);
+    font-style: italic;
+    font-size: 16px;
+    line-height: 1.55;
+    color: var(--ink);
+    text-align: justify;
+    hyphens: auto;
+    letter-spacing: 0.005em;
+  }
+
+  /* director's note — annotation on the AI portrait */
+  .note {
+    margin-top: 14px;
+    padding: 10px 14px;
+    background: var(--cream-2);
+    border-left: 2px solid var(--coral);
+    position: relative;
+  }
+  .note::before {
+    content: "her note —";
+    display: block;
+    font-family: var(--sans);
+    font-size: 8px;
+    letter-spacing: 0.22em;
+    color: var(--coral-deep);
+    text-transform: lowercase;
+    margin-bottom: 4px;
+  }
+  .note p {
+    font-family: var(--serif);
+    font-style: italic;
+    font-size: 13px;
+    line-height: 1.45;
+    color: var(--ink);
+  }
+
+  /* opening titles — letterboxd-style top 4 */
+  .titles-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 7px;
+  }
+  .poster {
+    aspect-ratio: 2/3;
+    padding: 6px 5px 7px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    color: var(--cream);
+    border: 0.5px solid var(--coral-deep);
+    cursor: pointer;
+    transition: transform 0.18s ease, box-shadow 0.18s ease;
+    position: relative;
+  }
+  .poster:hover {
+    transform: translateY(-3px) rotate(-0.5deg);
+    box-shadow: 2px 4px 0 var(--coral-deep);
+  }
+  .poster .year {
+    font-family: var(--mono);
+    font-size: 8px;
+    letter-spacing: 0.12em;
+    opacity: 0.85;
+  }
+  .poster .title {
+    font-family: var(--serif);
+    font-size: 11px;
+    line-height: 1.1;
+    font-weight: 500;
+  }
+  .poster .director {
+    font-family: var(--serif);
+    font-style: italic;
+    font-size: 8px;
+    margin-top: 2px;
+    opacity: 0.75;
+  }
+  .poster.bg-teal   { background: var(--teal); border-color: var(--teal-deep); }
+  .poster.bg-ink    { background: var(--ink); }
+  .poster.bg-coral  { background: var(--coral); }
+  .poster.bg-blue   { background: var(--blue); }
+  .poster.bg-amber  { background: var(--amber); color: var(--amber-deep); border-color: var(--amber-deep); }
+
+  /* stats — 2x2 grid */
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 6px;
+  }
+  .stat {
+    background: var(--cream-2);
+    border: 0.5px solid var(--coral-deep);
+    padding: 10px 4px;
+    text-align: center;
+  }
+  .stat .v {
+    font-family: var(--serif);
+    font-size: 18px;
+    font-weight: 500;
+    color: var(--coral-deep);
+    line-height: 1;
+  }
+  .stat .k {
+    font-family: var(--sans);
+    font-size: 8px;
+    letter-spacing: 0.14em;
+    color: var(--ink);
+    margin-top: 5px;
+    text-transform: lowercase;
+  }
+
+  /* prompts — the user's voice */
+  .prompt {
+    margin-bottom: 14px;
+  }
+  .prompt:last-child { margin-bottom: 0; }
+  .prompt .q {
+    font-family: var(--sans);
+    font-size: 10px;
+    letter-spacing: 0.14em;
+    color: var(--coral);
+    text-transform: lowercase;
+    margin-bottom: 6px;
+    font-weight: 500;
+  }
+  .prompt .a {
+    font-family: var(--serif);
+    font-size: 16px;
+    font-style: italic;
+    line-height: 1.5;
+    color: var(--ink);
+  }
+  .prompt .a::before {
+    content: '"';
+    color: var(--coral);
+    font-size: 22px;
+    margin-right: 1px;
+    font-weight: 600;
+  }
+  .prompt .a::after {
+    content: '"';
+    color: var(--coral);
+    font-size: 22px;
+    margin-left: 1px;
+    font-weight: 600;
+  }
+
+  /* now showing — live signal */
+  .now-showing {
+    background: var(--ink);
+    color: var(--cream);
+    padding: 14px 16px;
+    margin: 0 22px;
+    border: 0.5px solid var(--coral-deep);
+    position: relative;
+  }
+  .now-showing .reel {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-family: var(--sans);
+    font-size: 9px;
+    letter-spacing: 0.22em;
+    color: var(--amber);
+    text-transform: lowercase;
+    margin-bottom: 6px;
+  }
+  .now-showing .reel-dot {
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    background: var(--coral);
+    border-radius: 50%;
+    animation: pulse 2s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50%      { opacity: 0.5; transform: scale(1.2); }
+  }
+  .now-showing .text {
+    font-family: var(--serif);
+    font-style: italic;
+    font-size: 14px;
+    line-height: 1.4;
+  }
+
+  /* intentions — soft signal toggles, displayed as flags */
+  .intentions {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .intention {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    background: var(--cream-2);
+    border: 0.5px solid var(--coral-deep);
+  }
+  .intention .check {
+    width: 14px;
+    height: 14px;
+    background: var(--coral);
+    border: 0.5px solid var(--coral-deep);
+    color: var(--cream);
+    font-family: var(--serif);
+    font-size: 11px;
+    line-height: 13px;
+    text-align: center;
+    flex-shrink: 0;
+  }
+  .intention .text {
+    font-family: var(--serif);
+    font-style: italic;
+    font-size: 13px;
+    color: var(--ink);
+  }
+
+  /* action buttons */
+  .actions {
+    display: grid;
+    grid-template-columns: 1fr 1.6fr;
+    gap: 10px;
+    padding: 18px 22px 26px;
+  }
+  .btn {
+    padding: 14px;
+    font-family: var(--serif);
+    font-size: 15px;
+    letter-spacing: 0.05em;
+    border: 1px solid var(--coral-deep);
+    cursor: pointer;
+    transition: all 0.15s ease;
+    text-align: center;
+    background: transparent;
+    color: var(--coral-deep);
+    user-select: none;
+  }
+  .btn:hover { background: var(--coral-deep); color: var(--cream); }
+  .btn:active { transform: scale(0.97); }
+  .btn-primary {
+    background: var(--coral);
+    color: var(--cream);
+    font-weight: 500;
+  }
+  .btn-primary:hover { background: var(--coral-deep); }
+  .btn .icon {
+    margin-left: 4px;
+    font-style: normal;
+  }
+
+  /* footer signature */
+  .signature {
+    text-align: center;
+    padding: 6px 0 18px;
+    font-family: var(--serif);
+    font-style: italic;
+    font-size: 10px;
+    color: var(--coral-deep);
+    letter-spacing: 0.1em;
+    opacity: 0.6;
+  }
+
+  /* small responsive tweaks */
+  @media (max-width: 420px) {
+    .page { padding: 12px 8px 24px; }
+    .phone { box-shadow: 0 0 0 4px var(--cream), 0 0 0 5px var(--coral-deep); }
+    .chapter .name { font-size: 32px; }
+  }
+
+  /* match overlay (shows when 'encore' is clicked) */
+  .overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(58, 26, 14, 0.92);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s ease;
+  }
+  .overlay.show { opacity: 1; pointer-events: auto; }
+  .overlay-card {
+    background: var(--cream);
+    border: 1.5px solid var(--coral-deep);
+    box-shadow: 0 0 0 6px var(--cream), 0 0 0 8px var(--coral-deep);
+    padding: 36px 32px 28px;
+    max-width: 320px;
+    text-align: center;
+    transform: scale(0.9);
+    transition: transform 0.3s ease;
+  }
+  .overlay.show .overlay-card { transform: scale(1); }
+  .overlay-card .label {
+    font-family: var(--sans);
+    font-size: 9px;
+    letter-spacing: 0.22em;
+    color: var(--coral-deep);
+    text-transform: lowercase;
+    margin-bottom: 8px;
+  }
+  .overlay-card h2 {
+    font-family: var(--serif);
+    font-size: 32px;
+    font-weight: 500;
+    color: var(--coral-deep);
+    margin-bottom: 12px;
+    line-height: 1;
+  }
+  .overlay-card .heart {
+    font-size: 24px;
+    color: var(--coral);
+    margin: 8px 0;
+  }
+  .overlay-card p {
+    font-family: var(--serif);
+    font-style: italic;
+    font-size: 14px;
+    color: var(--ink);
+    margin-bottom: 20px;
+    line-height: 1.5;
+  }
+  .overlay-card button {
+    background: var(--coral);
+    color: var(--cream);
+    border: 1px solid var(--coral-deep);
+    padding: 10px 20px;
+    font-family: var(--serif);
+    font-size: 13px;
+    cursor: pointer;
+    letter-spacing: 0.05em;
+  }
+  .overlay-card button:hover { background: var(--coral-deep); }
+</style>
+</head>
+<body>
+
+<div class="page">
+  <div class="phone">
+
+    <!-- status bar -->
+    <div class="status">
+      <span>9:41</span>
+      <span>frame</span>
+      <span>●●●<span class="dot"></span>●</span>
+    </div>
+
+    <!-- top double rule -->
+    <div class="rule"></div>
+
+    <!-- app bar -->
+    <div class="app-bar">
+      <div class="back" title="Back">←</div>
+      <div class="logo">Frame</div>
+      <div class="menu">⋯</div>
+    </div>
+
+    <!-- chapter card: the name -->
+    <div class="chapter">
+      <div class="kicker">a portrait of</div>
+      <div class="name">Maya<span class="age">, 26</span></div>
+      <div class="meta">
+        <span>brooklyn</span>
+        <span class="sep">·</span>
+        <span>~2 km away</span>
+      </div>
+    </div>
+
+    <div class="rule"></div>
+
+    <!-- cinematic soul -->
+    <div class="section">
+      <div class="section-label">cinematic soul</div>
+      <p class="soul">
+        Watches everything twice. Finds beauty in slow cinema and difficult women directors. Probably thinks Nolan is overrated. Definitely already wrote her dissertation on Chantal Akerman.
+      </p>
+
+      <div class="note">
+        <p>actually 'would die for tony leung' is underselling it. more like 'already has' spiritually.</p>
+      </div>
+    </div>
+
+    <div class="rule-thin"></div>
+
+    <!-- opening titles — top 4 like letterboxd -->
+    <div class="section">
+      <div class="section-label">opening titles · her top four</div>
+      <div class="titles-grid">
+        <div class="poster bg-teal">
+          <div class="year">2000</div>
+          <div>
+            <div class="title">In the Mood for Love</div>
+            <div class="director">wong kar-wai</div>
+          </div>
+        </div>
+        <div class="poster bg-ink">
+          <div class="year">1979</div>
+          <div>
+            <div class="title">Stalker</div>
+            <div class="director">tarkovsky</div>
+          </div>
+        </div>
+        <div class="poster bg-coral">
+          <div class="year">1999</div>
+          <div>
+            <div class="title">Beau Travail</div>
+            <div class="director">claire denis</div>
+          </div>
+        </div>
+        <div class="poster bg-blue">
+          <div class="year">1975</div>
+          <div>
+            <div class="title">Jeanne Dielman</div>
+            <div class="director">akerman</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="rule-thin"></div>
+
+    <!-- stats -->
+    <div class="section">
+      <div class="section-label">by the numbers</div>
+      <div class="stats">
+        <div class="stat"><div class="v">612</div><div class="k">films</div></div>
+        <div class="stat"><div class="v">.82</div><div class="k">obscurity</div></div>
+        <div class="stat"><div class="v">3.1★</div><div class="k">avg rating</div></div>
+        <div class="stat"><div class="v">'70s</div><div class="k">era</div></div>
+      </div>
+    </div>
+
+    <div class="rule-thin"></div>
+
+    <!-- prompts — the director's voice -->
+    <div class="section">
+      <div class="section-label">in her own words</div>
+
+      <div class="prompt">
+        <div class="q">— a movie opinion i'll die on</div>
+        <div class="a">Jeanne Dielman beating Vertigo in the Sight and Sound poll was correct and we should all just accept it.</div>
+      </div>
+
+      <div class="prompt">
+        <div class="q">— what i want to watch with someone</div>
+        <div class="a">Something we can pause and argue about for 45 minutes. That's the point.</div>
+      </div>
+    </div>
+
+    <div class="rule-thin"></div>
+
+    <!-- now showing -->
+    <div class="now-showing">
+      <div class="reel">
+        <span class="reel-dot"></span>
+        <span>now showing</span>
+      </div>
+      <div class="text">
+        Rohmer's Six Moral Tales — on No.2, Suzanne's Career. Tentatively obsessed.
+      </div>
+    </div>
+
+    <div class="rule-thin"></div>
+
+    <!-- intentions -->
+    <div class="section">
+      <div class="section-label">she's here to —</div>
+      <div class="intentions">
+        <div class="intention">
+          <div class="check">✓</div>
+          <div class="text">find someone to argue about films with</div>
+        </div>
+        <div class="intention">
+          <div class="check">✓</div>
+          <div class="text">watch something neither of us has seen</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="rule"></div>
+
+    <!-- decorative diamond divider -->
+    <div class="rule-diamond">· ◆ ·</div>
+
+    <!-- actions -->
+    <div class="actions">
+      <button class="btn" id="passBtn">pass <span class="icon">✕</span></button>
+      <button class="btn btn-primary" id="encoreBtn">encore <span class="icon">♥</span></button>
+    </div>
+
+    <div class="signature">— end of reel —</div>
+
+  </div>
+</div>
+
+<!-- match overlay -->
+<div class="overlay" id="overlay">
+  <div class="overlay-card">
+    <div class="label">a chemistry of</div>
+    <h2>87% alignment</h2>
+    <div class="heart">♥</div>
+    <p>Now we wait for her to feel the same. We'll let you know.</p>
+    <button onclick="closeOverlay()">close</button>
+  </div>
+</div>
+
+<script>
+  const passBtn   = document.getElementById('passBtn');
+  const encoreBtn = document.getElementById('encoreBtn');
+  const overlay   = document.getElementById('overlay');
+
+  encoreBtn.addEventListener('click', () => {
+    overlay.classList.add('show');
+  });
+
+  passBtn.addEventListener('click', () => {
+    document.querySelector('.phone').style.transition = 'transform 0.3s ease, opacity 0.3s ease';
+    document.querySelector('.phone').style.transform = 'translateX(-30px) rotate(-2deg)';
+    document.querySelector('.phone').style.opacity = '0.4';
+    setTimeout(() => {
+      document.querySelector('.phone').style.transform = '';
+      document.querySelector('.phone').style.opacity = '';
+    }, 600);
+  });
+
+  function closeOverlay() {
+    overlay.classList.remove('show');
+  }
+
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) closeOverlay();
+  });
+
+  // small detail: clicking a poster could later open the film detail
+  document.querySelectorAll('.poster').forEach(p => {
+    p.addEventListener('click', () => {
+      const title = p.querySelector('.title').textContent;
+      console.log('Open film:', title);
+    });
+  });
+</script>
+
+</body>
+</html>
