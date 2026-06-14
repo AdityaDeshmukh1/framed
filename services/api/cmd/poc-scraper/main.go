@@ -1,30 +1,33 @@
 // POC: validates the Playwright → CF bypass → multi-page Letterboxd scrape chain.
 //
-// # Validated findings
+// # Validated findings (all confirmed end-to-end)
 //
 //  1. CF bypass works: Playwright with --disable-blink-features=AutomationControlled
-//     solves the CF JS challenge and yields a valid cf_clearance cookie (~50s on first
-//     run; subsequent runs from the same IP are faster once CF trusts the session).
+//     solves the CF JS challenge and yields a valid cf_clearance cookie (~4s on a
+//     trusted IP, ~50s on first contact). No cf_clearance on clean IPs (CF skips
+//     the challenge entirely and issues only session cookies).
 //
 //  2. HTML parsing works: Letterboxd changed structure. Old → new:
 //     - li.poster-container → li.griditem
 //     - div[data-film-slug] → div.react-component[data-item-slug]
 //     - data-owner-rating on <li> → span.rated-N inside p.poster-viewingdata
 //     - data-owner-liked on <li> → presence of span.icon-liked inside p.poster-viewingdata
-//     All fields parsed correctly (72/72 films, ratings 0.5★–4.5★, liked ♥).
+//     All fields parsed correctly (72/72 films on page 1, 47/47 on page 2).
 //
 //  3. Pagination detection works: li.paginate-page structure is unchanged.
 //
-// # Critical finding: CF session isolation
+//  4. Multi-page scraping works: 119 total films across 2 pages in a single run.
+//     Key constraint: ALL page fetches must stay within the same Playwright browser
+//     page — harvest letterboxd.com, then navigate page 1, page 2, ..., close.
 //
-// CF Bot Management uses Turnstile (managed mode) on page 2+ requests. The trigger
-// is CROSS-CLIENT use of the same cf_clearance: if page 1 is fetched via imroc/req
-// (one TLS fingerprint) and page 2 via Playwright (different TLS fingerprint), CF
-// flags the session and serves a Turnstile challenge on page 2.
+// # Critical constraint: CF session isolation
 //
-// Fix: use a single unbroken Playwright browser page for ALL page fetches within a
-// profile scrape — harvest on letterboxd.com, navigate page 1, navigate page 2, ...,
-// close. Never mix req and Playwright for the same user's film pages.
+// CF Bot Management triggers Turnstile (managed mode) on page 2+ when the same
+// cf_clearance is used across different TLS clients (e.g. req for page 1, Playwright
+// for page 2). This contaminates the session and causes persistent re-challenges.
+//
+// Rule: never mix req and Playwright for the same user's film pages. Use a single
+// unbroken Playwright page object for the entire profile scrape.
 //
 // imroc/req + Chrome TLS impersonation remains valid for single-request endpoints
 // (e.g. /csi/ stats) where there is no multi-page session to contaminate.
