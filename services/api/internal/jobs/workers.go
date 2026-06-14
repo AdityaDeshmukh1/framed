@@ -101,9 +101,18 @@ func (w *Workers) handleScrapeProfile(ctx context.Context, t *asynq.Task) error 
 
 	var enqueued, skipped int
 	for _, r := range ratings {
+		// The Playwright scraper returns TMDBMovieID=0; resolve it via TMDB search.
+		if r.TMDBMovieID == 0 && r.Title != "" {
+			id, err := w.enricher.SearchFilm(ctx, r.Title, r.Year)
+			if err != nil {
+				log.Printf("[scrape] job=%s TMDB search failed film=%q year=%d: %v", payload.JobID, r.Title, r.Year, err)
+			} else {
+				r.TMDBMovieID = id
+			}
+		}
 		if r.TMDBMovieID == 0 {
 			skipped++
-			log.Printf("[scrape] job=%s skip film=%q — no TMDB ID", payload.JobID, r.Title)
+			log.Printf("[scrape] job=%s skip film=%q year=%d — no TMDB ID", payload.JobID, r.Title, r.Year)
 			continue
 		}
 

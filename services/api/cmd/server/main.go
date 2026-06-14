@@ -49,8 +49,14 @@ func main() {
 	asynqClient := asynq.NewClient(redisOpt)
 	defer asynqClient.Close()
 
+	// ── Browser install (idempotent, ~170MB first run) ────────────────────────
+	log.Printf("checking Playwright browser install...")
+	if err := scraper.InstallBrowser(); err != nil {
+		log.Fatalf("playwright browser install: %v", err)
+	}
+
 	// ── Services ──────────────────────────────────────────────────────────────
-	scraperSvc := scraper.NewRSSImporter()
+	scraperSvc := scraper.NewPlaywrightScraper()
 	enricherSvc := enrichment.New(cfg.TMDBApiKey)
 
 	// ── Workers ───────────────────────────────────────────────────────────────
