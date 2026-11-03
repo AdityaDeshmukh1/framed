@@ -207,7 +207,7 @@ function Favourites({
   }
 
   return (
-    <div className="flex flex-col flex-1 gap-4 min-h-0">
+    <div className="flex flex-col gap-4 h-[calc(100svh-4rem)] min-h-0">
       <Header kicker="Step 1 of 2" title="Four Favourites" sub="Pick up to four. You can skip this." />
 
       <div className="grid grid-cols-4 gap-2">
@@ -238,7 +238,8 @@ function Favourites({
         />
       </label>
 
-      <div className="grid grid-cols-3 gap-2 overflow-y-auto max-h-[40vh] pr-1">
+      <div className="flex-1 min-h-0 overflow-y-auto -mx-1 px-1 py-1">
+        <div className="grid grid-cols-3 gap-2">
         {films.map((f) => {
           const isOn = selected.includes(f.tmdbId)
           return (
@@ -265,9 +266,10 @@ function Favourites({
             Not in the quiz pool yet. The real version will search all of TMDB.
           </p>
         )}
+        </div>
       </div>
 
-      <div className="mt-auto pt-2">
+      <div className="pt-1">
         <Button onClick={onNext}>{selected.length ? `Continue with ${selected.length}` : 'Skip'}</Button>
       </div>
     </div>
