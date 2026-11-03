@@ -3,6 +3,7 @@ package enrichment
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -15,6 +16,10 @@ import (
 )
 
 const defaultBaseURL = "https://api.themoviedb.org/3"
+
+// ErrNotFound means TMDB has no film with the requested ID. It is permanent,
+// so callers should not retry.
+var ErrNotFound = errors.New("not found on TMDB")
 
 func resolveBaseURL() string {
 	if v := os.Getenv("TMDB_BASE_URL"); v != "" {
@@ -212,7 +217,7 @@ func (t *TMDBClient) GetFilmDetails(ctx context.Context, tmdbID int) (*FilmData,
 		return nil, rateLimitFromResponse(resp)
 	}
 	if resp.StatusCode == http.StatusNotFound {
-		return nil, fmt.Errorf("film %d not found on TMDB", tmdbID)
+		return nil, fmt.Errorf("film %d: %w", tmdbID, ErrNotFound)
 	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("unexpected status %d", resp.StatusCode)

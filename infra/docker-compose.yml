@@ -34,6 +34,19 @@ services:
       timeout: 3s
       retries: 5
 
+  # ── Embedding service (sentence-transformers, all-MiniLM-L6-v2) ─────────────
+  ml:
+    build: ../services/ml
+    container_name: frame_ml
+    ports:
+      - "8001:8001"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+
 volumes:
   postgres_data:
   redis_data:

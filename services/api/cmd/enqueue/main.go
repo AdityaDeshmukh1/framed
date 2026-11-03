@@ -14,6 +14,8 @@ func main() {
 	userID := flag.String("user", "", "user UUID")
 	filmID := flag.String("film", "", "film UUID (embed/enrich)")
 	handle := flag.String("handle", "", "letterboxd handle (scrape)")
+	source := flag.String("source", "", "import source (scrape, optional; default from server config)")
+	jobID := flag.String("jobid", "", "scrape_jobs UUID to track progress against (scrape, optional)")
 	flag.Parse()
 
 	redisURL := os.Getenv("REDIS_URL")
@@ -28,7 +30,7 @@ func main() {
 
 	switch *job {
 	case "scrape":
-		t, err := jobs.NewScrapeProfileTask("", *userID, *handle) // no jobID when enqueuing manually
+		t, err := jobs.NewScrapeProfileTask(*jobID, *userID, *handle, *source)
 		if err != nil {
 			log.Fatalf("create task: %v", err)
 		}

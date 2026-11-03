@@ -11,9 +11,9 @@ import (
 
 	"github.com/framed-app/api/internal/enrichment"
 	"github.com/framed-app/api/internal/handlers"
+	"github.com/framed-app/api/internal/importer"
 	"github.com/framed-app/api/internal/jobs"
 	"github.com/framed-app/api/internal/middleware"
-	"github.com/framed-app/api/internal/scraper"
 	"github.com/framed-app/api/pkg/config"
 	"github.com/framed-app/api/pkg/db"
 	"github.com/gofiber/fiber/v2"
@@ -49,17 +49,27 @@ func main() {
 	asynqClient := asynq.NewClient(redisOpt)
 	defer asynqClient.Close()
 
+	// ── Import sources ────────────────────────────────────────────────────────
+	importers, err := buildImporters(cfg.ImportSources)
+	if err != nil {
+		log.Fatalf("import sources: %v", err)
+	}
+	log.Printf("import sources: %v (default %s)", cfg.ImportSources, importers.Default())
+
 	// ── Services ──────────────────────────────────────────────────────────────
-	scraperSvc := scraper.NewRSSImporter()
 	enricherSvc := enrichment.New(cfg.TMDBApiKey)
 
 	// ── Workers ───────────────────────────────────────────────────────────────
-	workers := jobs.NewWorkers(scraperSvc, enricherSvc, pool, asynqClient, cfg.AnthropicApiKey, cfg.MLServiceURL)
+	workers := jobs.NewWorkers(importers, enricherSvc, pool, asynqClient, cfg.AnthropicApiKey, cfg.MLServiceURL)
 	log.Printf("ML service URL: %s", cfg.MLServiceURL)
+	if err := jobs.CheckMLService(cfg.MLServiceURL); err != nil {
+		log.Printf("WARNING: %v — onboarding will fail at the embedding step until it is running (make dev)", err)
+	}
 
 	asynqServer := asynq.NewServer(redisOpt, asynq.Config{
 		Concurrency:    10,
 		RetryDelayFunc: asynq.DefaultRetryDelayFunc,
+		ErrorHandler:   asynq.ErrorHandlerFunc(workers.HandleError),
 		Queues: map[string]int{
 			"critical": 6,
 			"default":  3,
@@ -83,7 +93,7 @@ func main() {
 		Format:     "[${time}] ${method} ${path} → ${status} (${latency})\n",
 		TimeFormat: "15:04:05",
 	}))
-	h := handlers.New(pool, asynqClient, cfg.AnthropicApiKey)
+	h := handlers.New(pool, asynqClient, importers, cfg.AnthropicApiKey)
 	auth := middleware.ClerkAuth(pool, cfg.ClerkSecretKey)
 
 	// All routes require a valid Clerk JWT.
@@ -115,4 +125,28 @@ func main() {
 	_ = shutdownCtx
 
 	log.Println("framed API stopped")
+}
+
+// buildImporters constructs the enabled import sources in order; the first is
+// the onboarding default. Chromium is only installed when letterboxd_web is on.
+func buildImporters(sources []string) (*importer.Registry, error) {
+	if len(sources) == 0 {
+		return nil, fmt.Errorf("IMPORT_SOURCES is empty")
+	}
+	var imps []importer.Importer
+	for _, s := range sources {
+		switch importer.Source(s) {
+		case importer.SourceLetterboxdRSS:
+			imps = append(imps, importer.NewLetterboxdRSS())
+		case importer.SourceLetterboxdWeb:
+			log.Printf("checking Playwright browser install...")
+			if err := importer.InstallBrowser(); err != nil {
+				return nil, fmt.Errorf("playwright browser install: %w", err)
+			}
+			imps = append(imps, importer.NewLetterboxdWeb())
+		default:
+			return nil, fmt.Errorf("unknown import source %q", s)
+		}
+	}
+	return importer.NewRegistry(imps...), nil
 }

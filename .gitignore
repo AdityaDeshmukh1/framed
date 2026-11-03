@@ -31,3 +31,5 @@ Thumbs.db
 *.swp
 
 context.md
+# Local reference material
+services/api/tmdb-api.json
