@@ -17,6 +17,7 @@ import (
 	"github.com/framed-app/api/pkg/config"
 	"github.com/framed-app/api/pkg/db"
 	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v2/middleware/compress"
 	"github.com/gofiber/fiber/v2/middleware/logger"
 	"github.com/hibiken/asynq"
 )
@@ -50,7 +51,7 @@ func main() {
 	defer asynqClient.Close()
 
 	// ── Import sources ────────────────────────────────────────────────────────
-	importers, err := buildImporters(cfg.ImportSources)
+	importers, err := buildImporters(cfg.ImportSources, pool)
 	if err != nil {
 		log.Fatalf("import sources: %v", err)
 	}
@@ -89,6 +90,7 @@ func main() {
 
 	// ── HTTP Server ───────────────────────────────────────────────────────────
 	app := fiber.New()
+	app.Use(compress.New()) // the quiz pool is ~1MB of JSON; gzip takes it to ~400KB
 	app.Use(logger.New(logger.Config{
 		Format:     "[${time}] ${method} ${path} → ${status} (${latency})\n",
 		TimeFormat: "15:04:05",
@@ -103,6 +105,9 @@ func main() {
 	app.Post("/match", auth, h.Match)
 	app.Get("/matches", auth, h.GetMatches)
 	app.Get("/match/:matchId", auth, h.GetMatch)
+
+	app.Get("/quiz/pool", auth, h.QuizPool)
+	app.Put("/me/basics", auth, h.SaveBasics)
 
 	app.Post("/soul", auth, h.Soul)
 	app.Get("/soul", auth, h.GetSoul)
@@ -129,7 +134,7 @@ func main() {
 
 // buildImporters constructs the enabled import sources in order; the first is
 // the onboarding default. Chromium is only installed when letterboxd_web is on.
-func buildImporters(sources []string) (*importer.Registry, error) {
+func buildImporters(sources []string, pool *db.Pool) (*importer.Registry, error) {
 	if len(sources) == 0 {
 		return nil, fmt.Errorf("IMPORT_SOURCES is empty")
 	}
@@ -144,9 +149,32 @@ func buildImporters(sources []string) (*importer.Registry, error) {
 				return nil, fmt.Errorf("playwright browser install: %w", err)
 			}
 			imps = append(imps, importer.NewLetterboxdWeb())
+		case importer.SourceQuiz:
+			imps = append(imps, importer.NewQuiz(catalogueLookup(pool)))
 		default:
 			return nil, fmt.Errorf("unknown import source %q", s)
 		}
 	}
 	return importer.NewRegistry(imps...), nil
+}
+
+// catalogueLookup lets the quiz importer check answers against `films`.
+func catalogueLookup(pool *db.Pool) importer.CatalogueLookup {
+	return func(ctx context.Context, ids []int) (map[int]importer.CatalogueFilm, error) {
+		rows, err := pool.Query(ctx, `SELECT tmdb_id, title, year FROM films WHERE tmdb_id = ANY($1) AND embedding IS NOT NULL`, ids)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		out := map[int]importer.CatalogueFilm{}
+		for rows.Next() {
+			var id int
+			var f importer.CatalogueFilm
+			if err := rows.Scan(&id, &f.Title, &f.Year); err != nil {
+				return nil, err
+			}
+			out[id] = f
+		}
+		return out, rows.Err()
+	}
 }

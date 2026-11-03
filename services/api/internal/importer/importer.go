@@ -31,6 +31,9 @@ const (
 // source; new sources can add fields (tokens, uploaded files) here.
 type Request struct {
 	Handle string
+	// Submitted carries answers for sources where the client sends the
+	// ratings itself (the quiz).
+	Submitted []Submitted
 }
 
 // Film is one film from a user's history, as reported by a source.

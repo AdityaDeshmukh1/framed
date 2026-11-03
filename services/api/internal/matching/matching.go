@@ -59,17 +59,19 @@ func (m *Matcher) FindMatches(ctx context.Context, userID string, limit int) ([]
 
 // ── internal helpers ──────────────────────────────────────────────────────────
 
-// scoreFloor is the cosine similarity treated as "no shared taste". Taste
-// vectors are averages of sentence embeddings, which share a large common
-// component, so even two users with zero films in common score ~0.8 raw.
-// Measured on real profiles: different users ≈ 0.81, same profile = 1.0.
-// Recalibrate once there are more users.
-const scoreFloor = 0.75
+// Taste vectors are centred and signed (taste.Production), so cosine runs
+// from -1 (opposite tastes) to 1. On 40k MovieLens user pairs the 5th–95th
+// percentiles were -0.20 and 0.40; map that range to 0–100% so a typical
+// pair lands near 50% and the top 5% read as 95%+. Recalibrate on Framed's
+// own users once there are enough.
+const (
+	scoreFloor   = -0.20
+	scoreCeiling = 0.40
+)
 
-// displayScore stretches raw cosine similarity from [scoreFloor, 1] to [0, 1]
-// so match percentages use the whole range. Ordering is unchanged.
+// displayScore maps raw cosine to a 0–1 match score. Ordering is unchanged.
 func displayScore(cosine float64) float64 {
-	s := (cosine - scoreFloor) / (1 - scoreFloor)
+	s := (cosine - scoreFloor) / (scoreCeiling - scoreFloor)
 	return math.Max(0, math.Min(1, s))
 }
 

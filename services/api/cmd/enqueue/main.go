@@ -1,11 +1,13 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"log"
 	"os"
 
 	"github.com/framed-app/api/internal/jobs"
+	"github.com/framed-app/api/pkg/models"
 	"github.com/hibiken/asynq"
 )
 
@@ -16,6 +18,7 @@ func main() {
 	handle := flag.String("handle", "", "letterboxd handle (scrape)")
 	source := flag.String("source", "", "import source (scrape, optional; default from server config)")
 	jobID := flag.String("jobid", "", "scrape_jobs UUID to track progress against (scrape, optional)")
+	ratingsJSON := flag.String("ratings", "", `quiz answers as JSON, e.g. '[{"tmdb_id":550,"rating":4.5,"liked":true}]' (scrape -source quiz)`)
 	flag.Parse()
 
 	redisURL := os.Getenv("REDIS_URL")
@@ -30,7 +33,13 @@ func main() {
 
 	switch *job {
 	case "scrape":
-		t, err := jobs.NewScrapeProfileTask(*jobID, *userID, *handle, *source)
+		var ratings []models.SubmittedRating
+		if *ratingsJSON != "" {
+			if err := json.Unmarshal([]byte(*ratingsJSON), &ratings); err != nil {
+				log.Fatalf("parse -ratings: %v", err)
+			}
+		}
+		t, err := jobs.NewScrapeProfileTask(*jobID, *userID, *handle, *source, ratings...)
 		if err != nil {
 			log.Fatalf("create task: %v", err)
 		}

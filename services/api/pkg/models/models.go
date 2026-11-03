@@ -196,6 +196,15 @@ type ScrapeProfilePayload struct {
 	LetterboxdHandle string `json:"letterboxdHandle"`
 	// Source is the importer.Source to read from; empty means the registry default.
 	Source string `json:"source,omitempty"`
+	// Ratings are client-submitted answers (quiz source only).
+	Ratings []SubmittedRating `json:"ratings,omitempty"`
+}
+
+// SubmittedRating mirrors importer.Submitted; models can't import internal packages' types without a cycle risk.
+type SubmittedRating struct {
+	TMDBMovieID int      `json:"tmdb_id"`
+	Rating      *float32 `json:"rating,omitempty"`
+	Liked       bool     `json:"liked,omitempty"`
 }
 
 // EnrichFilmPayload is the data passed to the TMDB enrichment worker.

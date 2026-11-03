@@ -8,7 +8,6 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-
 type filmSummary struct {
 	ID    string `json:"id"`
 	Title string `json:"title"`
@@ -17,6 +16,7 @@ type filmSummary struct {
 
 type matchOtherUser struct {
 	ID               string `json:"id"`
+	DisplayName      string `json:"display_name"`
 	LetterboxdHandle string `json:"letterboxd_handle"`
 	Age              int    `json:"age"`
 	LocationCity     string `json:"location_city"`
@@ -24,12 +24,12 @@ type matchOtherUser struct {
 }
 
 type matchListItem struct {
-	ID            string          `json:"id"`
-	Score         float64         `json:"score"`
-	WhyText       string          `json:"why_text,omitempty"`
-	Status        string          `json:"status"`
-	OtherUser     matchOtherUser  `json:"other_user"`
-	FirstDateFilm *filmSummary    `json:"first_date_film,omitempty"`
+	ID            string         `json:"id"`
+	Score         float64        `json:"score"`
+	WhyText       string         `json:"why_text,omitempty"`
+	Status        string         `json:"status"`
+	OtherUser     matchOtherUser `json:"other_user"`
+	FirstDateFilm *filmSummary   `json:"first_date_film,omitempty"`
 }
 
 type ratedFilm struct {
@@ -89,10 +89,11 @@ func (h *Handlers) GetMatches(c *fiber.Ctx) error {
 			COALESCE(m.why_text, ''),
 			m.status,
 			CASE WHEN m.user_a = $1::uuid THEN m.user_b::text ELSE m.user_a::text END AS other_id,
-			u.age,
+			COALESCE(u.age, 0),
 			u.location_city,
 			u.location_country,
 			COALESCE(sj.letterboxd_handle, ''),
+			COALESCE(NULLIF(u.display_name, ''), NULLIF(sj.letterboxd_handle, ''), 'Film lover'),
 			COALESCE(f.id::text, ''),
 			COALESCE(f.title, ''),
 			COALESCE(f.year, 0)
@@ -122,6 +123,7 @@ func (h *Handlers) GetMatches(c *fiber.Ctx) error {
 			&item.OtherUser.ID, &item.OtherUser.Age,
 			&item.OtherUser.LocationCity, &item.OtherUser.LocationCountry,
 			&item.OtherUser.LetterboxdHandle,
+			&item.OtherUser.DisplayName,
 			&filmID, &filmTitle, &filmYear,
 		); err != nil {
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "scan error"})
@@ -153,8 +155,8 @@ func (h *Handlers) GetMatch(c *fiber.Ctx) error {
 	var item matchListItem
 	var userA, userB string
 	var ageA, ageB int
-	var cityA, countryA, handleA string
-	var cityB, countryB, handleB string
+	var cityA, countryA, handleA, nameA string
+	var cityB, countryB, handleB, nameB string
 	var filmID, filmTitle string
 	var filmYear int
 
@@ -166,10 +168,12 @@ func (h *Handlers) GetMatch(c *fiber.Ctx) error {
 			m.status,
 			m.user_a::text,
 			m.user_b::text,
-			u_a.age, u_a.location_city, u_a.location_country,
+			COALESCE(u_a.age, 0), u_a.location_city, u_a.location_country,
 			COALESCE(sj_a.letterboxd_handle, ''),
-			u_b.age, u_b.location_city, u_b.location_country,
+			COALESCE(NULLIF(u_a.display_name, ''), NULLIF(sj_a.letterboxd_handle, ''), 'Film lover'),
+			COALESCE(u_b.age, 0), u_b.location_city, u_b.location_country,
 			COALESCE(sj_b.letterboxd_handle, ''),
+			COALESCE(NULLIF(u_b.display_name, ''), NULLIF(sj_b.letterboxd_handle, ''), 'Film lover'),
 			COALESCE(f.id::text, ''),
 			COALESCE(f.title, ''),
 			COALESCE(f.year, 0)
@@ -183,12 +187,12 @@ func (h *Handlers) GetMatch(c *fiber.Ctx) error {
 			SELECT letterboxd_handle FROM scrape_jobs WHERE user_id = m.user_b ORDER BY created_at DESC LIMIT 1
 		) sj_b ON true
 		LEFT JOIN films f ON f.id = m.first_date_film_id
-		WHERE m.id = $1::uuid
-	`, matchID).Scan(
+		WHERE m.id = $1::uuid AND (m.user_a = $2::uuid OR m.user_b = $2::uuid)
+	`, matchID, requestingUserID).Scan(
 		&item.ID, &item.Score, &item.WhyText, &item.Status,
 		&userA, &userB,
-		&ageA, &cityA, &countryA, &handleA,
-		&ageB, &cityB, &countryB, &handleB,
+		&ageA, &cityA, &countryA, &handleA, &nameA,
+		&ageB, &cityB, &countryB, &handleB, &nameB,
 		&filmID, &filmTitle, &filmYear,
 	)
 	if err != nil {
@@ -201,16 +205,17 @@ func (h *Handlers) GetMatch(c *fiber.Ctx) error {
 	// Assign "me" vs "other" based on the requesting user.
 	var myID, theirID string
 	var theirAge int
-	var theirCity, theirCountry, theirHandle string
+	var theirCity, theirCountry, theirHandle, theirName string
 	if requestingUserID == userA {
 		myID, theirID = userA, userB
-		theirAge, theirCity, theirCountry, theirHandle = ageB, cityB, countryB, handleB
+		theirAge, theirCity, theirCountry, theirHandle, theirName = ageB, cityB, countryB, handleB, nameB
 	} else {
 		myID, theirID = userB, userA
-		theirAge, theirCity, theirCountry, theirHandle = ageA, cityA, countryA, handleA
+		theirAge, theirCity, theirCountry, theirHandle, theirName = ageA, cityA, countryA, handleA, nameA
 	}
 	item.OtherUser = matchOtherUser{
 		ID:               theirID,
+		DisplayName:      theirName,
 		LetterboxdHandle: theirHandle,
 		Age:              theirAge,
 		LocationCity:     theirCity,

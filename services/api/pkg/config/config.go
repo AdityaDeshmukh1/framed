@@ -58,7 +58,7 @@ func Load() (*Config, error) {
 		AnthropicApiKey: mustGetEnv("ANTHROPIC_API_KEY"),
 		OpenAIApiKey:    mustGetEnv("OPENAI_API_KEY"),
 		MLServiceURL:    getEnv("ML_SERVICE_URL", "http://localhost:8001"),
-		ImportSources:   splitList(getEnv("IMPORT_SOURCES", "letterboxd_rss")),
+		ImportSources:   splitList(getEnv("IMPORT_SOURCES", "letterboxd_rss,quiz")),
 		ClerkSecretKey:  mustGetEnv("CLERK_SECRET_KEY"),
 	}
 
