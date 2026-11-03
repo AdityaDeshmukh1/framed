@@ -1,195 +1,510 @@
 /**
- * Rating-quiz engine — pure functions, no React.
+ * Rating-quiz engine — adaptive preference elicitation over film embeddings.
  *
- * Picking the next film: we want films the user has probably seen (otherwise
- * the card is wasted) from parts of taste space we know least about. So each
- * candidate scores
+ * The model: a Gaussian process over the films' MiniLM embeddings (the same
+ * ones the backend uses). Every answer updates a guess of how much the user
+ * would like *every* film in the pool, plus how sure we are.
  *
- *   P(seen) × information
+ * Picking the next film: ask about films the user has probably seen, whose
+ * reaction we can least predict:
  *
- * where P(seen) is the film's popularity adjusted by how often this user has
- * said "haven't seen" to films with the same facets, and information is
- * higher for facets with few ratings so far. The real version will do the
- * same thing over embeddings instead of hand-written facets.
+ *   score = P(seen) × (uncertainty + bonus for a language not yet asked)
+ *
+ * uncertainty mixes raw model variance (what we haven't asked about) with how
+ * close P(like) is to a coin-flip (depends on what you liked/disliked).
+ * So loving Inception makes Interstellar boring (we can already guess), while
+ * films half-way between your likes and dislikes become the best questions.
+ *
+ * P(seen) starts from TMDB vote counts (ranked within each language, so big
+ * Hindi films aren't treated as obscure) and learns from your "haven't seen"
+ * answers on similar films: skip three Korean films and Korean sinks.
+ *
+ * Tuned against three simulated users (Bollywood + Nolan fan, cinephile,
+ * horror + animation): after 20 ratings the model ranks their unasked films
+ * with AUC 0.90–0.98, vs 0.32–0.97 for random card order.
+ *
+ * Everything is pure and synchronous; with ≤ 60 answers and ~400 films a
+ * full re-score is well under a few ms.
  */
 
-import { ALL_FACETS, QUIZ_FILMS, type Facet, type QuizFilm } from './films'
+/* ── Data ────────────────────────────────────────────────────────────────── */
 
-export type Answer = 'loved' | 'fine' | 'nope' | 'unseen'
-
-export interface Response {
-  filmId: string
-  answer: Answer
+export interface SeedFilm {
+  tmdbId: number
+  title: string
+  originalTitle?: string
+  year: number
+  directors: string[]
+  genres: string[]
+  language: string
+  posterPath: string
+  voteCount: number
+  embedding: number[]
 }
 
+export interface Person {
+  handle: string
+  films: number
+  topGenres: string[]
+  vector: number[]
+}
+
+export interface PoolFilm extends SeedFilm {
+  /** unit-length raw embedding (what the backend stores) */
+  raw: Float64Array
+  /** pool-mean-centred, unit-length: used for similarity inside the quiz */
+  centred: Float64Array
+  /** prior probability a typical user has seen it, from TMDB vote count */
+  seenPrior: number
+  /** same, for someone who watches films in this language */
+  seenPriorLocal: number
+}
+
+export type Pool = { films: PoolFilm[]; byId: Map<number, PoolFilm>; bigLanguages: Set<string> }
+
+export function buildPool(seed: SeedFilm[]): Pool {
+  const dim = seed[0]?.embedding.length ?? 0
+  const raws = seed.map((f) => normalize(Float64Array.from(f.embedding)))
+  const mean = new Float64Array(dim)
+  for (const r of raws) for (let i = 0; i < dim; i++) mean[i] += r[i] / raws.length
+  const langRank = rankWithinLanguage(seed)
+  const films = seed.map((f, idx) => {
+    const centred = new Float64Array(dim)
+    for (let i = 0; i < dim; i++) centred[i] = raws[idx][i] - mean[i]
+    // ~200 votes → 5%, ~30k votes → 92%
+    const global = clamp((Math.log10(Math.max(f.voteCount, 1)) - 2.3) / 2.3, 0.05, 0.92)
+    // TMDB votes skew to Hollywood: a Hindi hit has a tenth of the votes of a
+    // Marvel film. Blend in rank *within its own language* so the biggest
+    // Hindi/Tamil/Korean films count as widely seen too.
+    const within = langRank.get(f.tmdbId)
+    return {
+      ...f,
+      raw: raws[idx],
+      centred: normalize(centred),
+      seenPrior: within === undefined ? global : 0.5 * global + 0.5 * within,
+      seenPriorLocal: within === undefined ? global : Math.max(global, within),
+    }
+  })
+  const counts = new Map<string, number>()
+  for (const f of seed) counts.set(f.language, (counts.get(f.language) ?? 0) + 1)
+  const bigLanguages = new Set([...counts].filter(([, n]) => n >= NOVEL_MIN_FILMS).map(([l]) => l))
+  return { films, byId: new Map(films.map((f) => [f.tmdbId, f])), bigLanguages }
+}
+
+/** 0.92 for the most-voted film in a language down to 0.32 for the least. */
+function rankWithinLanguage(seed: SeedFilm[]) {
+  const byLang = new Map<string, SeedFilm[]>()
+  for (const f of seed) byLang.set(f.language, [...(byLang.get(f.language) ?? []), f])
+  const out = new Map<number, number>()
+  for (const films of byLang.values()) {
+    if (films.length < 5) continue
+    films.sort((a, b) => b.voteCount - a.voteCount)
+    films.forEach((f, i) => out.set(f.tmdbId, 0.92 - (0.6 * i) / (films.length - 1)))
+  }
+  return out
+}
+
+export const LANGUAGE_NAMES: Record<string, string> = {
+  en: 'English', hi: 'Hindi', ta: 'Tamil', te: 'Telugu', ml: 'Malayalam', kn: 'Kannada', bn: 'Bengali',
+  mr: 'Marathi', ko: 'Korean', ja: 'Japanese', fr: 'French', es: 'Spanish', it: 'Italian', de: 'German',
+  zh: 'Chinese', cn: 'Cantonese', pt: 'Portuguese', sv: 'Swedish', da: 'Danish', fa: 'Persian',
+}
+
+export const posterUrl = (path: string, size: 'w185' | 'w342' | 'w500' = 'w500') =>
+  `https://image.tmdb.org/t/p/${size}${path}`
+
+/* ── State ───────────────────────────────────────────────────────────────── */
+
+export type Answer = 'loved' | 'fine' | 'nope' | 'unseen'
+export interface Response {
+  id: number
+  answer: Answer
+  /** this card was a follow-up to the previous answer (no follow-up chains) */
+  followUp?: boolean
+}
 export interface QuizState {
-  favourites: string[]
+  favourites: number[]
   responses: Response[]
 }
 
-/** Stop asking once this many seen films are rated. */
-export const TARGET_RATED = 20
-/** Allow finishing early from this many. */
+/** Answers on the Letterboxd 0.5–5 scale (what the backend would store). */
+export const ANSWER_RATING: Record<Exclude<Answer, 'unseen'>, number> = { loved: 4.5, fine: 3, nope: 1.5 }
+const FAVOURITE_RATING = 5
+
 export const MIN_RATED = 8
-/** Hard cap on cards shown, including "haven't seen". */
-export const MAX_SHOWN = 45
+/** Simulated users reach this in ~20–30 cards. */
+export const TARGET_CONFIDENCE = 0.35
+export const MAX_RATED = 35
+export const MAX_SHOWN = 60
 
-/** Ratings sent to the backend, on Letterboxd's 0.5–5 scale. */
-const ANSWER_RATING: Record<Exclude<Answer, 'unseen'>, number> = {
-  loved: 4.5,
-  fine: 3,
-  nope: 1.5,
-}
+export const ratedCount = (s: QuizState) => s.responses.filter((r) => r.answer !== 'unseen').length
 
-export const filmById = new Map(QUIZ_FILMS.map((f) => [f.id, f]))
+/* ── Model ───────────────────────────────────────────────────────────────── */
 
-function facetStats(state: QuizState) {
-  const rated: Record<string, number> = {}
-  const shown: Record<string, number> = {}
-  const seen: Record<string, number> = {}
-  const bump = (m: Record<string, number>, f: Facet, by = 1) => (m[f] = (m[f] ?? 0) + by)
+// Kernel = how much liking film A tells us about film B. Tuned by simulating
+// three synthetic users against the real pool (apps/web/scripts/quiz-sim.py):
+//   local:    near-identical films (Totoro ↔ Spirited Away)
+//   linear:   broad direction in embedding space (dark crime vs. feel-good)
+//   language: the embeddings are built from English TMDB text and carry no
+//             language/era signal, so "loves Hindi cinema" is added here
+//   era:      decade taste
+//   bias:     how generous this user is overall
+const LOCAL = 0.8
+const LENGTH = 0.25
+const LINEAR = 3.0
+const LANGUAGE = 1.0
+const ERA = 0.3
+const BIAS = 0.3
+const NOISE = 0.45 // answer noise
+const FAV_NOISE = 0.15 // favourites are deliberate, so trust them more
+const PRIOR_VAR = LOCAL + LINEAR + LANGUAGE + ERA + BIAS
 
-  for (const id of state.favourites) {
-    for (const f of filmById.get(id)?.facets ?? []) bump(rated, f)
-  }
-  for (const r of state.responses) {
-    for (const f of filmById.get(r.filmId)?.facets ?? []) {
-      bump(shown, f)
-      if (r.answer !== 'unseen') {
-        bump(seen, f)
-        bump(rated, f)
-      }
-    }
-  }
-  return { rated, shown, seen }
-}
-
-export function ratedCount(state: QuizState) {
-  return state.responses.filter((r) => r.answer !== 'unseen').length
-}
-
-export function isDone(state: QuizState) {
-  return ratedCount(state) >= TARGET_RATED || state.responses.length >= MAX_SHOWN || nextFilm(state) === null
-}
-
-export function nextFilm(state: QuizState): QuizFilm | null {
-  const used = new Set([...state.favourites, ...state.responses.map((r) => r.filmId)])
-  const { rated, shown, seen } = facetStats(state)
-
-  let best: QuizFilm | null = null
-  let bestScore = -Infinity
-  for (const film of QUIZ_FILMS) {
-    if (used.has(film.id)) continue
-    // Per facet, the share of films the user has seen (weak prior of 2/3).
-    // Take the lowest: one "never watches arthouse" facet sinks the film.
-    const seenRate = Math.min(...film.facets.map((f) => ((seen[f] ?? 0) + 1) / ((shown[f] ?? 0) + 1.5)))
-    const pSeen = film.popularity * seenRate
-    const info = film.facets.reduce((s, f) => s + 1 / (1 + (rated[f] ?? 0)), 0) / film.facets.length
-    // Deterministic per-film jitter so ties don't always resolve the same way.
-    const jitter = 1 + 0.08 * ((hash(film.id) % 100) / 100)
-    const score = Math.pow(pSeen, 1.5) * info * jitter
-    if (score > bestScore) {
-      bestScore = score
-      best = film
-    }
-  }
-  return best
-}
-
-export interface FacetAffinity {
-  facet: Facet
-  /** −1 (avoids) … +1 (loves), relative to the user's own average */
-  affinity: number
-  /** how many rated films back this up */
-  evidence: number
-}
-
-export interface TasteProfile {
-  strength: number
-  strengthLabel: 'Sketch' | 'Outline' | 'Portrait'
-  facets: FacetAffinity[]
-  rated: number
-  unseen: number
-}
-
-export function buildProfile(state: QuizState): TasteProfile {
-  const points: { film: QuizFilm; value: number; weight: number }[] = []
-  for (const id of state.favourites) {
-    const film = filmById.get(id)
-    if (film) points.push({ film, value: 5, weight: 2 })
-  }
-  for (const r of state.responses) {
-    const film = filmById.get(r.filmId)
-    if (film && r.answer !== 'unseen') points.push({ film, value: ANSWER_RATING[r.answer], weight: 1 })
-  }
-
-  const totalW = points.reduce((s, p) => s + p.weight, 0)
-  const mean = totalW ? points.reduce((s, p) => s + p.value * p.weight, 0) / totalW : 3
-
-  const sum: Partial<Record<Facet, number>> = {}
-  const w: Partial<Record<Facet, number>> = {}
-  const n: Partial<Record<Facet, number>> = {}
-  for (const p of points) {
-    for (const f of p.film.facets) {
-      sum[f] = (sum[f] ?? 0) + (p.value - mean) * p.weight
-      w[f] = (w[f] ?? 0) + p.weight
-      n[f] = (n[f] ?? 0) + 1
-    }
-  }
-
-  const facets = ALL_FACETS.filter((f) => n[f])
-    .map((f) => ({
-      facet: f,
-      // Shrink towards 0 with little evidence; ±2 stars from the mean is "max".
-      affinity: Math.max(-1, Math.min(1, (sum[f]! / (w[f]! + 1)) / 2)),
-      evidence: n[f]!,
-    }))
-    .sort((a, b) => b.affinity - a.affinity)
-
-  const rated = ratedCount(state)
-  const signal = state.favourites.length * 3 + rated
-  const coverage = facets.length / ALL_FACETS.length
-  const strength = Math.min(1, signal / 32) * (0.6 + 0.4 * coverage)
-
-  return {
-    strength,
-    strengthLabel: strength < 0.35 ? 'Sketch' : strength < 0.7 ? 'Outline' : 'Portrait',
-    facets,
-    rated,
-    unseen: state.responses.length - rated,
-  }
-}
-
+/** Weight on "we know nothing here" vs "could go either way". */
+const SPREAD_WEIGHT = 0.7
+/** Bonus for a language not shown yet: makes sure we probe each one once. */
+const NOVEL_LANGUAGE = 0.6
+/** Only languages with at least this many pool films get probed. */
+const NOVEL_MIN_FILMS = 8
 /**
- * What the quiz would POST to the backend. Same shape as importer.Film, so a
- * `quiz` Importer can feed the existing pipeline unchanged.
+ * Bonus for films we think you'll like. Pure uncertainty sampling learns fast
+ * but feels deaf: love one Hindi film and it never shows another. This keeps
+ * following your likes, to tell apart *which* ones you love.
  */
-export function toImportPayload(state: QuizState) {
-  const film = (id: string) => filmById.get(id)!
+const LIKE_BONUS = 0.35
+
+const sim = (a: Float64Array, b: Float64Array) => {
+  let d = 0
+  for (let i = 0; i < a.length; i++) d += a[i] * b[i]
+  return d
+}
+const kernel = (a: PoolFilm, b: PoolFilm) => {
+  const s = sim(a.centred, b.centred)
+  return (
+    LOCAL * Math.exp((s - 1) / LENGTH) +
+    LINEAR * s +
+    (a.language === b.language ? LANGUAGE : 0) +
+    ERA * Math.exp(-Math.abs(a.year - b.year) / 15) +
+    BIAS
+  )
+}
+
+interface Obs {
+  film: PoolFilm
+  y: number // rating − 3
+  noise: number
+}
+
+function observations(pool: Pool, s: QuizState): Obs[] {
+  const obs: Obs[] = []
+  for (const id of s.favourites) {
+    const film = pool.byId.get(id)
+    if (film) obs.push({ film, y: FAVOURITE_RATING - 3, noise: FAV_NOISE })
+  }
+  for (const r of s.responses) {
+    const film = pool.byId.get(r.id)
+    if (film && r.answer !== 'unseen') obs.push({ film, y: ANSWER_RATING[r.answer] - 3, noise: NOISE })
+  }
+  return obs
+}
+
+export interface Prediction {
+  film: PoolFilm
+  /** predicted rating − 3 */
+  mean: number
+  variance: number
+  pLike: number
+  pSeen: number
+  uncertainty: number
+  /** bonus for a language we haven't asked about yet */
+  novel: number
+  score: number
+  /** set when this card follows up on the previous loved/disliked film */
+  followUpOf?: { title: string; answer: Answer }
+}
+
+export interface Model {
+  predictions: Prediction[] // every unused film, best question first
+  /** 0–1: how much of the prior uncertainty the answers have removed */
+  confidence: number
+  obs: Obs[]
+}
+
+export function fitModel(pool: Pool, s: QuizState): Model {
+  const obs = observations(pool, s)
+  const n = obs.length
+  const used = new Set([...s.favourites, ...s.responses.map((r) => r.id)])
+
+  // GP posterior: alpha = (K + N)⁻¹ y via Cholesky.
+  const K = new Float64Array(n * n)
+  for (let i = 0; i < n; i++)
+    for (let j = 0; j <= i; j++) {
+      const k = kernel(obs[i].film, obs[j].film) + (i === j ? obs[i].noise : 0)
+      K[i * n + j] = k
+      K[j * n + i] = k
+    }
+  const L = cholesky(K, n)
+  const alpha = cholSolve(L, n, Float64Array.from(obs.map((o) => o.y)))
+
+  // Seen model: similarity-weighted share of "seen" among everything shown.
+  const shown = [
+    ...s.favourites.map((id) => ({ film: pool.byId.get(id), seen: 1 })),
+    ...s.responses.map((r) => ({ film: pool.byId.get(r.id), seen: r.answer === 'unseen' ? 0 : 1 })),
+  ].filter((x): x is { film: PoolFilm; seen: number } => !!x.film)
+  const shownLanguages = new Set(shown.map((x) => x.film.language))
+  // Seen one Hindi film? Then judge Hindi films the way a Hindi viewer would.
+  const watchedLanguages = new Set(shown.filter((x) => x.seen).map((x) => x.film.language))
+
+  let varSum = 0
+  let varWeight = 0
+  const predictions: Prediction[] = []
+  for (const film of pool.films) {
+    const kx = new Float64Array(n)
+    for (let i = 0; i < n; i++) kx[i] = kernel(film, obs[i].film)
+    let mean = 0
+    for (let i = 0; i < n; i++) mean += kx[i] * alpha[i]
+    const v = forwardSub(L, n, kx)
+    let variance = PRIOR_VAR
+    for (let i = 0; i < n; i++) variance -= v[i] * v[i]
+    variance = Math.max(variance, 1e-6)
+
+    // Model confidence over the films people actually know.
+    varSum += film.seenPrior * (variance / PRIOR_VAR)
+    varWeight += film.seenPrior
+    if (used.has(film.tmdbId)) continue
+
+    let wSeen = 0
+    let wTotal = 0
+    for (const x of shown) {
+      // "Haven't seen" spreads to similar films, and strongly within a language.
+      const w = Math.exp((sim(film.centred, x.film.centred) - 1) / 0.3) * (film.language === x.film.language ? 4 : 1)
+      wSeen += w * x.seen
+      wTotal += w
+    }
+    const PRIOR_STRENGTH = 1.5
+    const prior = watchedLanguages.has(film.language) ? film.seenPriorLocal : film.seenPrior
+    const pSeen = (wSeen + PRIOR_STRENGTH * prior) / (wTotal + PRIOR_STRENGTH)
+
+    // "Loved" ≈ more than half a star above "fine".
+    const pLike = normCdf((mean - 0.5) / Math.sqrt(variance + NOISE))
+    const coinFlip = entropy(pLike) // 1 when 50/50
+    const spread = Math.sqrt(variance / PRIOR_VAR) // 1 when we know nothing
+    const uncertainty = (1 - SPREAD_WEIGHT) * coinFlip + SPREAD_WEIGHT * spread
+    const novel = shownLanguages.has(film.language) || !pool.bigLanguages.has(film.language) ? 0 : NOVEL_LANGUAGE
+    const likeBonus = n > 0 ? LIKE_BONUS * pLike : 0
+    predictions.push({ film, mean, variance, pLike, pSeen, uncertainty, novel, score: pSeen * (uncertainty + novel + likeBonus) })
+  }
+  predictions.sort((a, b) => b.score - a.score)
+
+  // Follow-up: right after a strong reaction, show the closest film to it.
+  // Loved → "does this land too?" (which of these do you *really* love);
+  // nope → "is this different?" (the film, or the whole kind of film?).
+  const last = s.responses.at(-1)
+  const lastFilm = last && pool.byId.get(last.id)
+  if (last && lastFilm && (last.answer === 'loved' || last.answer === 'nope') && !last.followUp) {
+    let best = -1
+    let bestScore = -Infinity
+    predictions.forEach((p, i) => {
+      const closeness = (kernel(lastFilm, p.film) - BIAS) / (PRIOR_VAR - BIAS)
+      const sc = closeness * p.pSeen * (0.5 + p.uncertainty)
+      if (sc > bestScore) {
+        bestScore = sc
+        best = i
+      }
+    })
+    if (best >= 0) {
+      const [p] = predictions.splice(best, 1)
+      predictions.unshift({ ...p, followUpOf: { title: lastFilm.originalTitle ?? lastFilm.title, answer: last.answer } })
+    }
+  }
+  return { predictions, confidence: 1 - varSum / varWeight, obs }
+}
+
+export function isDone(model: Model, s: QuizState) {
+  const rated = ratedCount(s)
+  return (
+    model.predictions.length === 0 ||
+    s.responses.length >= MAX_SHOWN ||
+    rated >= MAX_RATED ||
+    (rated >= MIN_RATED && model.confidence >= TARGET_CONFIDENCE)
+  )
+}
+
+export function strengthLabel(confidence: number): 'Sketch' | 'Outline' | 'Portrait' {
+  return confidence < 0.15 ? 'Sketch' : confidence < 0.28 ? 'Outline' : 'Portrait'
+}
+
+/* ── "Why this film?" ───────────────────────────────────────────────────── */
+
+export function explain(model: Model, p: Prediction): string {
+  if (model.obs.length === 0) return 'Starting with something most people have seen.'
+  if (p.followUpOf) {
+    return p.followUpOf.answer === 'loved'
+      ? `You loved ${p.followUpOf.title}. Does this one land too?`
+      : `${p.followUpOf.title} wasn't for you. Is this different?`
+  }
+  if (p.novel > 0) {
+    const lang = LANGUAGE_NAMES[p.film.language] ?? 'this language'
+    return `Your first ${lang} film here. Is ${lang} cinema your thing?`
+  }
+  let best: Obs | null = null
+  let bestSim = -Infinity
+  for (const o of model.obs) {
+    const s = sim(p.film.centred, o.film.centred)
+    if (s > bestSim) {
+      bestSim = s
+      best = o
+    }
+  }
+  if (best && bestSim > 0.22) {
+    const t = best.film.title
+    if (best.y >= 1.5) return p.pLike > 0.6 ? `You loved ${t}. Does this land too?` : `Close to ${t}, which you loved, but we can't call this one.`
+    if (best.y <= -1) return `${t} wasn't for you. Is this different?`
+    return `You were lukewarm on ${t}. Tie-breaker.`
+  }
+  const lovedSameLang = model.obs.find((o) => o.y >= 1.5 && o.film.language === p.film.language && o.film.language !== 'en')
+  if (lovedSameLang) {
+    const lang = LANGUAGE_NAMES[p.film.language] ?? ''
+    return p.pLike > 0.6
+      ? `More ${lang}: you loved ${lovedSameLang.film.originalTitle ?? lovedSameLang.film.title}. Is this one up there too?`
+      : `You loved ${lovedSameLang.film.originalTitle ?? lovedSameLang.film.title}. Does this side of ${lang} cinema work for you?`
+  }
+  const askedGenres = new Set(model.obs.flatMap((o) => o.film.genres))
+  const fresh = p.film.genres.find((g) => !askedGenres.has(g))
+  if (fresh) return `New territory: we don't know your take on ${fresh.toLowerCase()} yet.`
+  if (p.pLike > 0.65) return `We think you'll love this. ${Math.round(p.pLike * 100)}% sure.`
+  if (p.pLike < 0.3) return "Our guess: not your thing. Prove us wrong?"
+  const lines = ['Could go either way for you.', "We can't call this one.", 'Honestly, no idea what you’ll say.']
+  return lines[p.film.tmdbId % lines.length]
+}
+
+/* ── Results ─────────────────────────────────────────────────────────────── */
+
+interface Entry {
+  film: PoolFilm
+  rating: number
+  liked: boolean
+}
+
+function entries(pool: Pool, s: QuizState): Entry[] {
+  const out: Entry[] = []
+  for (const id of s.favourites) {
+    const film = pool.byId.get(id)
+    if (film) out.push({ film, rating: FAVOURITE_RATING, liked: true })
+  }
+  for (const r of s.responses) {
+    const film = pool.byId.get(r.id)
+    if (film && r.answer !== 'unseen') out.push({ film, rating: ANSWER_RATING[r.answer], liked: r.answer === 'loved' })
+  }
+  return out
+}
+
+/** Same maths as computeTasteVector in services/api/internal/jobs/taste.go. */
+export function tasteVector(pool: Pool, s: QuizState): Float64Array | null {
+  const es = entries(pool, s)
+  if (!es.length) return null
+  const avg = es.reduce((a, e) => a + e.rating, 0) / es.length
+  const v = new Float64Array(es[0].film.raw.length)
+  for (const e of es) {
+    const w = Math.max(1 + (e.rating - avg) + (e.liked ? 1 : 0), 0.1)
+    for (let i = 0; i < v.length; i++) v[i] += w * e.film.raw[i]
+  }
+  return normalize(v)
+}
+
+/** Same calibration as displayScore in services/api/internal/matching. */
+export const displayScore = (cosine: number) => clamp((cosine - 0.75) / 0.25, 0, 1)
+
+export function matchPeople(vec: Float64Array, people: Person[]) {
+  return people
+    .map((p) => {
+      const cos = sim(vec, normalize(Float64Array.from(p.vector)))
+      return { person: p, cosine: cos, score: displayScore(cos) }
+    })
+    .sort((a, b) => b.score - a.score)
+}
+
+export function genreAffinity(model: Model) {
+  const sum = new Map<string, number>()
+  const n = new Map<string, number>()
+  for (const o of model.obs)
+    for (const g of o.film.genres) {
+      sum.set(g, (sum.get(g) ?? 0) + o.y)
+      n.set(g, (n.get(g) ?? 0) + 1)
+    }
+  return [...sum.keys()]
+    .map((g) => ({ genre: g, affinity: clamp(sum.get(g)! / (n.get(g)! + 1) / 1.5, -1, 1), evidence: n.get(g)! }))
+    .sort((a, b) => b.affinity - a.affinity)
+}
+
+/** Same shape as importer.Film, so a `quiz` importer can feed the pipeline. */
+export function toImportPayload(pool: Pool, s: QuizState) {
   return {
     source: 'quiz',
-    films: [
-      ...state.favourites.map((id) => ({
-        title: film(id).title,
-        year: film(id).year,
-        rating: 5,
-        liked: true,
-        favourite: true,
-      })),
-      ...state.responses
-        .filter((r) => r.answer !== 'unseen')
-        .map((r) => ({
-          title: film(r.filmId).title,
-          year: film(r.filmId).year,
-          rating: ANSWER_RATING[r.answer as Exclude<Answer, 'unseen'>],
-          liked: r.answer === 'loved',
-        })),
-    ],
+    films: entries(pool, s).map((e) => ({
+      tmdbMovieId: e.film.tmdbId,
+      title: e.film.title,
+      year: e.film.year,
+      rating: e.rating,
+      liked: e.liked,
+    })),
   }
 }
 
-function hash(s: string) {
-  let h = 0
-  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0
-  return h
+/* ── Maths helpers ───────────────────────────────────────────────────────── */
+
+function normalize(v: Float64Array) {
+  let s = 0
+  for (const x of v) s += x * x
+  const n = Math.sqrt(s) || 1
+  for (let i = 0; i < v.length; i++) v[i] /= n
+  return v
+}
+
+function clamp(x: number, lo: number, hi: number) {
+  return Math.min(hi, Math.max(lo, x))
+}
+
+function cholesky(A: Float64Array, n: number) {
+  const L = new Float64Array(n * n)
+  for (let i = 0; i < n; i++)
+    for (let j = 0; j <= i; j++) {
+      let s = A[i * n + j]
+      for (let k = 0; k < j; k++) s -= L[i * n + k] * L[j * n + k]
+      L[i * n + j] = i === j ? Math.sqrt(Math.max(s, 1e-9)) : s / L[j * n + j]
+    }
+  return L
+}
+
+function forwardSub(L: Float64Array, n: number, b: Float64Array) {
+  const x = new Float64Array(n)
+  for (let i = 0; i < n; i++) {
+    let s = b[i]
+    for (let k = 0; k < i; k++) s -= L[i * n + k] * x[k]
+    x[i] = s / L[i * n + i]
+  }
+  return x
+}
+
+function cholSolve(L: Float64Array, n: number, b: Float64Array) {
+  const y = forwardSub(L, n, b)
+  const x = new Float64Array(n)
+  for (let i = n - 1; i >= 0; i--) {
+    let s = y[i]
+    for (let k = i + 1; k < n; k++) s -= L[k * n + i] * x[k]
+    x[i] = s / L[i * n + i]
+  }
+  return x
+}
+
+function normCdf(z: number) {
+  // Abramowitz–Stegun 7.1.26
+  const t = 1 / (1 + 0.3275911 * Math.abs(z) / Math.SQRT2)
+  const y =
+    1 - ((((1.061405429 * t - 1.453152027) * t + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-(z * z) / 2)
+  return z >= 0 ? (1 + y) / 2 : (1 - y) / 2
+}
+
+function entropy(p: number) {
+  if (p <= 0 || p >= 1) return 0
+  return -(p * Math.log2(p) + (1 - p) * Math.log2(1 - p))
 }

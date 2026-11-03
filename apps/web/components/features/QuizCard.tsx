@@ -1,91 +1,107 @@
 'use client'
 
 /**
- * QuizCard — a draggable film card for the rating quiz.
- * Drag right = loved, left = not for me. The parent handles buttons/keys.
+ * QuizCard — a draggable poster card for the rating quiz.
+ * Drag right = loved, left = not for me, up = it's fine. The parent handles
+ * buttons and keys.
  */
 
-import { motion, useMotionValue, useTransform } from 'framer-motion'
-import type { QuizFilm } from '../../lib/quiz/films'
-import { FACET_LABELS } from '../../lib/quiz/films'
-import { POSTER_COLORS, POSTER_COLOR_SEQUENCE } from '../../lib/constants'
-import type { PosterVariant } from '../../lib/types'
+import { motion, useMotionValue, useTransform, type MotionValue } from 'framer-motion'
+import { posterUrl, type PoolFilm } from '../../lib/quiz/engine'
 
-const SWIPE_THRESHOLD = 110
+const SWIPE = 110
 
 interface Props {
-  film: QuizFilm
-  onSwipe: (dir: 'left' | 'right') => void
+  film: PoolFilm
+  reason: string
+  onSwipe: (dir: 'left' | 'right' | 'up') => void
 }
 
-export function posterColor(id: string): PosterVariant {
-  let h = 0
-  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0
-  return POSTER_COLOR_SEQUENCE[h % POSTER_COLOR_SEQUENCE.length] as PosterVariant
-}
-
-export function QuizCard({ film, onSwipe }: Props) {
+export function QuizCard({ film, reason, onSwipe }: Props) {
   const x = useMotionValue(0)
+  const y = useMotionValue(0)
   const rotate = useTransform(x, [-200, 200], [-12, 12])
-  const lovedOpacity = useTransform(x, [20, SWIPE_THRESHOLD], [0, 1])
-  const nopeOpacity = useTransform(x, [-SWIPE_THRESHOLD, -20], [1, 0])
-  const { bg, text } = POSTER_COLORS[posterColor(film.id)]
+  const loved = useTransform(x, [20, SWIPE], [0, 1])
+  const nope = useTransform(x, [-SWIPE, -20], [1, 0])
+  const fine = useTransform(y, [-SWIPE, -20], [1, 0])
 
   return (
     <motion.div
       className="absolute inset-0 cursor-grab active:cursor-grabbing touch-none select-none"
-      style={{ x, rotate }}
-      drag="x"
+      style={{ x, y, rotate }}
+      drag
       dragSnapToOrigin
       dragElastic={0.9}
       onDragEnd={(_, info) => {
-        if (info.offset.x > SWIPE_THRESHOLD) onSwipe('right')
-        else if (info.offset.x < -SWIPE_THRESHOLD) onSwipe('left')
+        const { x: dx, y: dy } = info.offset
+        if (dy < -SWIPE && Math.abs(dy) > Math.abs(dx)) onSwipe('up')
+        else if (dx > SWIPE) onSwipe('right')
+        else if (dx < -SWIPE) onSwipe('left')
       }}
     >
-      <div
-        className="relative h-full rounded-3xl overflow-hidden flex flex-col justify-between p-6 shadow-xl"
-        style={{ background: bg, color: text }}
-      >
-        <div className="flex items-start justify-between">
-          <span className="font-mono text-sm font-semibold opacity-70 tabular-nums">{film.year}</span>
-          <div className="flex flex-col gap-2" aria-hidden="true">
-            {[...Array(6)].map((_, i) => (
-              <div key={i} className="w-2 h-2 rounded-full" style={{ background: text, opacity: 0.15 }} />
-            ))}
-          </div>
+      <div className="relative h-full rounded-3xl overflow-hidden shadow-xl" style={{ background: 'var(--ink-deep)' }}>
+        {/* eslint-disable-next-line @next/next/no-img-element -- mock: TMDB CDN directly */}
+        <img
+          src={posterUrl(film.posterPath)}
+          alt=""
+          draggable={false}
+          className="absolute inset-0 w-full h-full object-cover pointer-events-none"
+        />
+        <div
+          className="absolute inset-0 pointer-events-none"
+          style={{ background: 'linear-gradient(to bottom, rgba(26,24,23,0.55) 0%, transparent 22%, transparent 45%, rgba(26,24,23,0.95) 100%)' }}
+        />
+
+        {/* Why this film */}
+        <div className="absolute top-4 inset-x-4">
+          <p className="font-sans text-xs font-medium leading-snug px-3 py-2 rounded-xl backdrop-blur-sm" style={{ background: 'rgba(250,238,218,0.88)', color: 'var(--ink-deep)' }}>
+            {reason}
+          </p>
         </div>
 
-        <div className="flex flex-col gap-3">
-          <h2 className="font-serif italic text-4xl leading-[1.05] font-semibold">{film.title}</h2>
-          <p className="font-sans text-sm opacity-75">{film.director}</p>
-          <div className="flex flex-wrap gap-1.5">
-            {film.facets.map((f) => (
-              <span
-                key={f}
-                className="font-sans text-[10px] uppercase tracking-widest font-semibold px-2 py-1 rounded-full"
-                style={{ background: 'rgba(0,0,0,0.15)' }}
-              >
-                {FACET_LABELS[f]}
+        <div className="absolute bottom-0 inset-x-0 p-5 flex flex-col gap-1.5" style={{ color: 'var(--cream)' }}>
+          <h2 className="font-serif italic text-3xl leading-[1.05] font-semibold">{film.originalTitle ?? film.title}</h2>
+          {film.originalTitle && <p className="font-sans text-xs opacity-60 -mt-1">{film.title}</p>}
+          <p className="font-sans text-sm opacity-80">
+            {film.year}
+            {film.directors[0] ? ` · ${film.directors.slice(0, 2).join(', ')}` : ''}
+          </p>
+          <div className="flex flex-wrap gap-1.5 pt-1">
+            {film.genres.slice(0, 3).map((g) => (
+              <span key={g} className="font-sans text-[10px] uppercase tracking-widest font-semibold px-2 py-1 rounded-full" style={{ background: 'rgba(250,238,218,0.15)' }}>
+                {g}
               </span>
             ))}
           </div>
         </div>
 
-        {/* Drag feedback stamps */}
-        <motion.div
-          className="absolute top-8 left-6 -rotate-12 border-4 rounded-lg px-3 py-1 font-sans font-bold text-2xl tracking-widest"
-          style={{ opacity: lovedOpacity, borderColor: 'white', color: 'white', background: 'var(--teal)' }}
-        >
-          LOVED
-        </motion.div>
-        <motion.div
-          className="absolute top-8 right-6 rotate-12 border-4 rounded-lg px-3 py-1 font-sans font-bold text-2xl tracking-widest"
-          style={{ opacity: nopeOpacity, borderColor: 'white', color: 'white', background: 'var(--ink-deep)' }}
-        >
-          NOPE
-        </motion.div>
+        <Stamp opacity={loved} className="left-5 -rotate-12" bg="var(--teal)" label="LOVED" />
+        <Stamp opacity={nope} className="right-5 rotate-12" bg="var(--ink-deep)" label="NOPE" />
+        <Stamp opacity={fine} className="left-1/2 -translate-x-1/2" bg="var(--amber)" label="FINE" color="var(--ink-deep)" />
       </div>
+    </motion.div>
+  )
+}
+
+function Stamp({
+  opacity,
+  className,
+  bg,
+  label,
+  color = 'white',
+}: {
+  opacity: MotionValue<number>
+  className: string
+  bg: string
+  label: string
+  color?: string
+}) {
+  return (
+    <motion.div
+      className={`absolute top-24 border-4 rounded-lg px-3 py-1 font-sans font-bold text-2xl tracking-widest ${className}`}
+      style={{ opacity, borderColor: 'white', color, background: bg }}
+    >
+      {label}
     </motion.div>
   )
 }
