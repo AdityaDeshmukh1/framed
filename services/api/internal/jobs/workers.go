@@ -1,21 +1,19 @@
 package jobs
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
 	"math"
-	"net/http"
-	"strconv"
-	"strings"
 	"time"
 
+	"github.com/framed-app/api/internal/embedding"
 	"github.com/framed-app/api/internal/enrichment"
 	"github.com/framed-app/api/internal/importer"
 	"github.com/framed-app/api/internal/llm"
+	"github.com/framed-app/api/internal/taste"
 	"github.com/framed-app/api/pkg/db"
 	"github.com/framed-app/api/pkg/models"
 	"github.com/hibiken/asynq"
@@ -29,7 +27,7 @@ type Workers struct {
 	enricher     *enrichment.TMDBClient
 	pool         *db.Pool
 	anthropicKey string
-	mlServiceURL string
+	embedder     *embedding.Client
 	// tmdbSem caps concurrent TMDB requests — CloudFront resets connections
 	// when too many hit simultaneously from the same IP.
 	tmdbSem chan struct{}
@@ -42,17 +40,9 @@ func NewWorkers(importers *importer.Registry, enricher *enrichment.TMDBClient, p
 		pool:         pool,
 		asynqClient:  asynqClient,
 		anthropicKey: anthropicKey,
-		mlServiceURL: mlServiceURL,
+		embedder:     embedding.NewClient(mlServiceURL),
 		tmdbSem:      make(chan struct{}, 5),
 	}
-}
-
-type embedRequest struct {
-	Text string `json:"text"`
-}
-
-type embedResponse struct {
-	Embedding []float32 `json:"embedding"`
 }
 
 // Register wires up all job handlers to the Asynq mux.
@@ -89,7 +79,11 @@ func (w *Workers) handleScrapeProfile(ctx context.Context, t *asynq.Task) error 
 		// Retrying won't enable a source — fail the job now.
 		return fmt.Errorf("%w: %w", err, asynq.SkipRetry)
 	}
-	ratings, err := imp.Import(ctx, importer.Request{Handle: payload.LetterboxdHandle})
+	req := importer.Request{Handle: payload.LetterboxdHandle}
+	for _, r := range payload.Ratings {
+		req.Submitted = append(req.Submitted, importer.Submitted{TMDBMovieID: r.TMDBMovieID, Rating: r.Rating, Liked: r.Liked})
+	}
+	ratings, err := imp.Import(ctx, req)
 	if err != nil {
 		return fmt.Errorf("import from %s: %w", imp.Source(), err)
 	}
@@ -103,7 +97,7 @@ func (w *Workers) handleScrapeProfile(ctx context.Context, t *asynq.Task) error 
 		log.Printf("[scrape] job=%s failed to update films_found: %v", payload.JobID, err)
 	}
 
-	var enqueued, skipped int
+	var enqueued, ready, skipped int
 	for _, r := range ratings {
 		// Sources that don't know the TMDB ID leave it 0; resolve it via TMDB search.
 		if r.TMDBMovieID == 0 && r.Title != "" {
@@ -147,6 +141,31 @@ RETURNING id`,
 			return fmt.Errorf("upsert film: %w", err)
 		}
 
+		// Store (or update, on a re-import or a retaken quiz) the rating.
+		if _, err = w.pool.Exec(ctx,
+			`INSERT INTO user_ratings (user_id, film_id, rating, watched_date, rewatch, liked)
+			 VALUES ($1, $2, $3, $4, $5, $6)
+			 ON CONFLICT (user_id, film_id) DO UPDATE SET
+			   rating = EXCLUDED.rating, liked = EXCLUDED.liked, rewatch = EXCLUDED.rewatch,
+			   watched_date = COALESCE(EXCLUDED.watched_date, user_ratings.watched_date)`,
+			payload.UserID, filmID, r.Rating, r.WatchedDate, r.Rewatch, r.Liked,
+		); err != nil {
+			return fmt.Errorf("upsert rating: %w", err)
+		}
+
+		// Catalogue films are already enriched and embedded at the current
+		// text version: nothing to fetch.
+		var isReady bool
+		if err := w.pool.QueryRow(ctx,
+			`SELECT embedding_computed AND embedding IS NOT NULL AND embedding_version >= $2 FROM films WHERE id = $1`,
+			filmID, embedding.TextVersion).Scan(&isReady); err != nil {
+			return fmt.Errorf("check film %s: %w", filmID, err)
+		}
+		if isReady {
+			ready++
+			continue
+		}
+
 		enrichTask, err := NewEnrichFilmTask(filmID, r.TMDBMovieID, slug, payload.JobID)
 		if err != nil {
 			log.Printf("[scrape] job=%s failed to create enrich task for film=%q: %v", payload.JobID, r.Title, err)
@@ -155,24 +174,32 @@ RETURNING id`,
 				log.Printf("[scrape] job=%s failed to enqueue enrich task for film=%q: %v", payload.JobID, r.Title, err)
 			}
 		}
-
-		// store ratings in user_ratings table
-		var ratingID string
-		err = w.pool.QueryRow(ctx,
-			`INSERT INTO user_ratings (user_id, film_id, rating, watched_date, rewatch, liked)
-VALUES ($1, $2, $3, $4, $5, $6)
-     ON CONFLICT DO NOTHING
-     RETURNING id`,
-			payload.UserID, filmID, r.Rating, r.WatchedDate, r.Rewatch, r.Liked,
-		).Scan(&ratingID)
-		if err != nil && err != pgx.ErrNoRows {
-			return fmt.Errorf("insert rating: %w", err)
-		}
 		enqueued++
 	}
 
-	log.Printf("[scrape] job=%s done: %d films queued for enrichment, %d skipped (no TMDB ID), scrape elapsed=%s",
-		payload.JobID, enqueued, skipped, time.Since(scrapeStart).Round(time.Millisecond))
+	log.Printf("[scrape] job=%s done: %d films queued for enrichment, %d already in catalogue, %d skipped (no TMDB ID), scrape elapsed=%s",
+		payload.JobID, enqueued, ready, skipped, time.Since(scrapeStart).Round(time.Millisecond))
+
+	// Everything was already in the catalogue (always true for the quiz):
+	// no enrich/embed task will fire, so build the taste vector now.
+	if enqueued == 0 {
+		if ready == 0 {
+			return fmt.Errorf("job=%s: no usable films: %w", payload.JobID, asynq.SkipRetry)
+		}
+		if _, err := w.pool.Exec(ctx,
+			`UPDATE scrape_jobs SET status = 'embedding', films_processed = 0, completed_at = now() WHERE id = $1`,
+			payload.JobID); err != nil {
+			log.Printf("[scrape] job=%s failed to update status to embedding: %v", payload.JobID, err)
+		}
+		task, err := NewComputeVectorTask(payload.UserID)
+		if err != nil {
+			return err
+		}
+		if _, err := w.asynqClient.Enqueue(task); err != nil {
+			return fmt.Errorf("enqueue taste vector: %w", err)
+		}
+		return nil
+	}
 
 	// films_processed = enrich tasks queued (not total ratings) so handleEnrichFilm
 	// can detect "all done" by comparing films_enriched to films_processed.
@@ -313,13 +340,18 @@ func (w *Workers) handleEnrichFilm(ctx context.Context, t *asynq.Task) error {
 
 	_, err = w.pool.Exec(ctx,
 		`UPDATE films
-         SET synopsis = $1, directors = $2, genres = $3, poster_path = $4, themes = $5
-         WHERE id = $6`,
+         SET synopsis = $1, directors = $2, genres = $3, poster_path = $4, themes = $5,
+             language = $6, country = $7, runtime = $8, popularity = $9
+         WHERE id = $10`,
 		filmData.Synopsis,
 		filmData.Directors,
 		filmData.Genres,
 		filmData.PosterPath,
 		filmData.Keywords,
+		nullIfEmpty(filmData.Language),
+		nullIfEmpty(filmData.Country),
+		filmData.Runtime,
+		filmData.Popularity,
 		payload.FilmID,
 	)
 	if err != nil {
@@ -366,7 +398,7 @@ func (w *Workers) handleComputeVector(ctx context.Context, t *asynq.Task) error 
 	defer rows.Close()
 
 	type entry struct {
-		tasteEntry
+		taste.Entry
 		genres    []string
 		directors []string
 	}
@@ -383,14 +415,14 @@ func (w *Workers) handleComputeVector(ctx context.Context, t *asynq.Task) error 
 		if err := rows.Scan(&rating, &liked, &embStr, &genres, &directors); err != nil {
 			return fmt.Errorf("scan row: %w", err)
 		}
-		emb, err := parseVector(embStr)
+		emb, err := embedding.ParseVector(embStr)
 		if err != nil {
 			return fmt.Errorf("parse embedding: %w", err)
 		}
 		entries = append(entries, entry{
-			tasteEntry: tasteEntry{rating: rating, liked: liked, embedding: emb},
-			genres:     genres,
-			directors:  directors,
+			Entry:     taste.Entry{Rating: rating, Liked: liked, Embedding: emb},
+			genres:    genres,
+			directors: directors,
 		})
 		if rating != nil {
 			ratingSum += *rating
@@ -414,20 +446,25 @@ func (w *Workers) handleComputeVector(ctx context.Context, t *asynq.Task) error 
 	// the midpoint between them, which pushes every pair to opposite sides
 	// (measured cos ≈ -0.78 for different users). Matching rescales raw cosine
 	// instead — see matching.displayScore. Revisit with a stable reference mean.
-	tasteEntries := make([]tasteEntry, len(entries))
+	tasteEntries := make([]taste.Entry, len(entries))
 	for i, e := range entries {
-		tasteEntries[i] = e.tasteEntry
+		tasteEntries[i] = e.Entry
 	}
-	vec := computeTasteVector(tasteEntries, nil)
+	center, err := w.catalogueMean(ctx)
+	if err != nil {
+		return fmt.Errorf("load catalogue mean: %w", err)
+	}
+	opts := taste.Production(center)
+	if center == nil {
+		log.Printf("[vector] WARNING: no catalogue_mean in taste_reference (run cmd/catalogue); using V1 weights for user=%s", payload.UserID)
+		opts = taste.V1
+	}
+	vec := taste.Vector(tasteEntries, opts)
 	if vec == nil {
 		return fmt.Errorf("taste vector for user=%s has zero length", payload.UserID)
 	}
 
-	parts := make([]string, len(vec))
-	for i, v := range vec {
-		parts[i] = fmt.Sprintf("%g", v)
-	}
-	vecStr := "[" + strings.Join(parts, ",") + "]"
+	vecStr := embedding.FormatVector(vec)
 
 	// Score genres and directors: weight = max(0, rating − avg) + 1 so every
 	// film contributes a base count and highly-rated films contribute more.
@@ -435,8 +472,8 @@ func (w *Workers) handleComputeVector(ctx context.Context, t *asynq.Task) error 
 	directorScores := map[string]float64{}
 	for _, e := range entries {
 		w := 1.0
-		if e.rating != nil {
-			w += math.Max(0, *e.rating-avgRating)
+		if e.Rating != nil {
+			w += math.Max(0, *e.Rating-avgRating)
 		}
 		for _, g := range e.genres {
 			genreScores[g] += w
@@ -449,14 +486,16 @@ func (w *Workers) handleComputeVector(ctx context.Context, t *asynq.Task) error 
 	topDirectors := topN(directorScores, 5)
 
 	_, err = w.pool.Exec(ctx,
-		`INSERT INTO taste_vectors (user_id, vector, top_genres, top_directors)
-		 VALUES ($1, $2::vector, $3, $4)
+		`INSERT INTO taste_vectors (user_id, vector, top_genres, top_directors, film_count, confidence)
+		 VALUES ($1, $2::vector, $3, $4, $5, $6)
 		 ON CONFLICT (user_id) DO UPDATE
 		   SET vector        = EXCLUDED.vector,
 		       top_genres    = EXCLUDED.top_genres,
 		       top_directors = EXCLUDED.top_directors,
+		       film_count    = EXCLUDED.film_count,
+		       confidence    = EXCLUDED.confidence,
 		       computed_at   = now()`,
-		payload.UserID, vecStr, topGenres, topDirectors)
+		payload.UserID, vecStr, topGenres, topDirectors, len(entries), taste.Confidence(ratedCount))
 	if err != nil {
 		return fmt.Errorf("upsert taste vector for user=%s: %w", payload.UserID, err)
 	}
@@ -561,22 +600,6 @@ func (w *Workers) fetchTasteSnapshot(ctx context.Context, userID string) (llm.Ta
 	return snap, nil
 }
 
-func parseVector(s string) ([]float32, error) {
-	s = strings.TrimSpace(s)
-	s = strings.TrimPrefix(s, "[")
-	s = strings.TrimSuffix(s, "]")
-	parts := strings.Split(s, ",")
-	vec := make([]float32, len(parts))
-	for i, p := range parts {
-		v, err := strconv.ParseFloat(strings.TrimSpace(p), 32)
-		if err != nil {
-			return nil, fmt.Errorf("parse element %d %q: %w", i, p, err)
-		}
-		vec[i] = float32(v)
-	}
-	return vec, nil
-}
-
 func (w *Workers) handleEmbedFilm(ctx context.Context, t *asynq.Task) error {
 	var payload models.EmbedFilmPayload
 	if err := json.Unmarshal(t.Payload(), &payload); err != nil {
@@ -585,71 +608,32 @@ func (w *Workers) handleEmbedFilm(ctx context.Context, t *asynq.Task) error {
 
 	log.Printf("[embed] starting embed for film=%s", payload.FilmID)
 
-	var synopsis, title string
-	var year int
-	var genres, directors, themes []string
-
+	var f embedding.Film
+	var language, country *string
 	err := w.pool.QueryRow(ctx,
-		`SELECT synopsis, genres, directors, themes, title, year FROM films
-			WHERE id = $1`,
-		payload.FilmID).Scan(&synopsis, &genres, &directors, &themes, &title, &year)
+		`SELECT synopsis, genres, directors, themes, title, year, language, country
+		 FROM films WHERE id = $1`,
+		payload.FilmID).Scan(&f.Synopsis, &f.Genres, &f.Directors, &f.Keywords, &f.Title, &f.Year, &language, &country)
 	if err != nil {
 		return fmt.Errorf("fetch film id: %w", err)
 	}
-
-	embeddingText := strings.Join(genres, " ") + ". " +
-		strings.Join(directors, " ") + ". " +
-		strings.Join(themes, " ") + ". " +
-		synopsis
-	if strings.TrimSpace(strings.ReplaceAll(embeddingText, ".", "")) == "" {
-		// Enrichment failed for this film — fall back to title+year so the
-		// embedding is still meaningful and the vector computation can proceed.
-		embeddingText = fmt.Sprintf("%s %d", title, year)
-		log.Printf("[embed] film=%s using title+year fallback (no enrichment data)", payload.FilmID)
+	if language != nil {
+		f.Language = *language
+	}
+	if country != nil {
+		f.Country = *country
 	}
 
-	endpoint := w.mlServiceURL + "/embed"
-
-	body, err := json.Marshal(embedRequest{Text: embeddingText})
+	vec, err := w.embedder.Embed(ctx, embedding.Text(f, embedding.TextVersion))
 	if err != nil {
-		return fmt.Errorf("marshal request: %w", err)
+		return fmt.Errorf("film=%s: %w", payload.FilmID, err)
 	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
-	if err != nil {
-		return fmt.Errorf("build request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("execute request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("embed service returned status %d for film=%s", resp.StatusCode, payload.FilmID)
-	}
-
-	var embedding embedResponse
-	if err := json.NewDecoder(resp.Body).Decode(&embedding); err != nil {
-		return fmt.Errorf("decode response: %w", err)
-	}
-
-	parts := make([]string, len(embedding.Embedding))
-	for i, v := range embedding.Embedding {
-		parts[i] = fmt.Sprintf("%g", v)
-	}
-	vecStr := "[" + strings.Join(parts, ",") + "]"
 
 	_, err = w.pool.Exec(ctx,
 		`UPDATE films
-         SET embedding = $1::vector, embedding_computed = $2
-         WHERE id = $3`,
-		vecStr,
-		true,
-		payload.FilmID,
-	)
+		 SET embedding = $1::vector, embedding_computed = true, embedding_version = $2
+		 WHERE id = $3`,
+		embedding.FormatVector(vec), embedding.TextVersion, payload.FilmID)
 	if err != nil {
 		return fmt.Errorf("update film %s: %w", payload.FilmID, err)
 	}
@@ -705,4 +689,25 @@ func (w *Workers) enqueueReadyVectors(ctx context.Context, filmID string) {
 			log.Printf("[embed] failed to enqueue vector task for user=%s err=%v", userID, err)
 		}
 	}
+}
+
+func nullIfEmpty(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
+}
+
+// catalogueMean loads the centring vector written by cmd/catalogue; nil if
+// it hasn't been computed yet.
+func (w *Workers) catalogueMean(ctx context.Context) ([]float32, error) {
+	var s string
+	err := w.pool.QueryRow(ctx, `SELECT vector::text FROM taste_reference WHERE name = 'catalogue_mean'`).Scan(&s)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return embedding.ParseVector(s)
 }

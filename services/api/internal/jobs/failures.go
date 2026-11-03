@@ -3,11 +3,10 @@ package jobs
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"log"
-	"net/http"
 	"time"
 
+	"github.com/framed-app/api/internal/embedding"
 	"github.com/framed-app/api/pkg/models"
 	"github.com/hibiken/asynq"
 )
@@ -70,14 +69,5 @@ func (w *Workers) failJob(ctx context.Context, where, arg, reason string) {
 // CheckMLService pings the embedding service once so a missing service is
 // obvious at startup instead of surfacing as a silent stall mid-pipeline.
 func CheckMLService(baseURL string) error {
-	client := http.Client{Timeout: 3 * time.Second}
-	resp, err := client.Get(baseURL + "/health")
-	if err != nil {
-		return fmt.Errorf("embedding service unreachable at %s: %w", baseURL, err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("embedding service at %s returned %d", baseURL, resp.StatusCode)
-	}
-	return nil
+	return embedding.NewClient(baseURL).Health()
 }

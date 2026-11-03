@@ -33,3 +33,6 @@ Thumbs.db
 context.md
 # Local reference material
 services/api/tmdb-api.json
+
+# Downloaded datasets (MovieLens etc.)
+data/

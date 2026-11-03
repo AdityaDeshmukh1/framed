@@ -8,12 +8,13 @@ import (
 	"github.com/hibiken/asynq"
 )
 
-func NewScrapeProfileTask(jobID, userID, handle, source string) (*asynq.Task, error) {
+func NewScrapeProfileTask(jobID, userID, handle, source string, ratings ...models.SubmittedRating) (*asynq.Task, error) {
 	payload := models.ScrapeProfilePayload{
 		JobID:            jobID,
 		UserID:           userID,
 		LetterboxdHandle: handle,
 		Source:           source,
+		Ratings:          ratings,
 	}
 
 	bytes, err := json.Marshal(payload)
