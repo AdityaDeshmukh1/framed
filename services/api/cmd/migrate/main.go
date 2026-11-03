@@ -92,6 +92,9 @@ func runUp(ctx context.Context, conn *pgx.Conn) error {
 	var ran int
 	for _, file := range files {
 		name := filepath.Base(file)
+		if strings.HasSuffix(name, "_down.sql") {
+			continue // rollback files are only run by `migrate down`
+		}
 		if applied[name] {
 			log.Printf("  skip  %s", name)
 			continue
