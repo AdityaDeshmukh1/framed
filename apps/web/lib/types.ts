@@ -26,6 +26,8 @@ export interface RatedFilm extends FilmSummary {
 /** The other user as returned by GET /matches and GET /match */
 export interface OtherUser {
   id: string
+  /** what to call them: their chosen name, else their Letterboxd handle */
+  display_name: string
   letterboxd_handle: string
   age: number
   location_city: string

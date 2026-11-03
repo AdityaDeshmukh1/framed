@@ -35,7 +35,7 @@ function toMatchCardProps(item: MatchListItem) {
     why_text: item.why_text || undefined,
     shared_films: [], // not available in list view — shown in detail
     other_user: {
-      display_name:      item.other_user.letterboxd_handle,
+      display_name:      item.other_user.display_name,
       letterboxd_handle: item.other_user.letterboxd_handle,
       age:               item.other_user.age || undefined,
       location:          location || undefined,

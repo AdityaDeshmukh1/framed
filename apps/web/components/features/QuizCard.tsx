@@ -2,11 +2,13 @@
 
 /**
  * QuizCard — a draggable poster card for the rating quiz.
- * Drag right = loved, left = not for me, up = it's fine. The parent handles
- * buttons and keys.
+ * Drag right = loved, left = not for me, up = it's fine, double-tap = all-time
+ * favourite. The parent handles buttons and keys.
  */
 
-import { motion, useMotionValue, useTransform, type MotionValue } from 'framer-motion'
+import { useRef, useState } from 'react'
+import { AnimatePresence, motion, useMotionValue, useTransform, type MotionValue } from 'framer-motion'
+import { Star } from 'lucide-react'
 import { posterUrl, type PoolFilm } from '../../lib/quiz/engine'
 
 const SWIPE = 110
@@ -15,9 +17,14 @@ interface Props {
   film: PoolFilm
   reason: string
   onSwipe: (dir: 'left' | 'right' | 'up') => void
+  onFavourite: () => void
 }
 
-export function QuizCard({ film, reason, onSwipe }: Props) {
+const DOUBLE_TAP_MS = 300
+
+export function QuizCard({ film, reason, onSwipe, onFavourite }: Props) {
+  const lastTap = useRef(0)
+  const [burst, setBurst] = useState(false)
   const x = useMotionValue(0)
   const y = useMotionValue(0)
   const rotate = useTransform(x, [-200, 200], [-12, 12])
@@ -32,6 +39,16 @@ export function QuizCard({ film, reason, onSwipe }: Props) {
       drag
       dragSnapToOrigin
       dragElastic={0.9}
+      onTap={() => {
+        const now = Date.now()
+        if (now - lastTap.current < DOUBLE_TAP_MS) {
+          lastTap.current = 0
+          setBurst(true)
+          setTimeout(onFavourite, 280)
+        } else {
+          lastTap.current = now
+        }
+      }}
       onDragEnd={(_, info) => {
         const { x: dx, y: dy } = info.offset
         if (dy < -SWIPE && Math.abs(dy) > Math.abs(dx)) onSwipe('up')
@@ -60,8 +77,7 @@ export function QuizCard({ film, reason, onSwipe }: Props) {
         </div>
 
         <div className="absolute bottom-0 inset-x-0 p-5 flex flex-col gap-1.5" style={{ color: 'var(--cream)' }}>
-          <h2 className="font-serif italic text-3xl leading-[1.05] font-semibold">{film.originalTitle ?? film.title}</h2>
-          {film.originalTitle && <p className="font-sans text-xs opacity-60 -mt-1">{film.title}</p>}
+          <h2 className="font-serif italic text-3xl leading-[1.05] font-semibold">{film.title}</h2>
           <p className="font-sans text-sm opacity-80">
             {film.year}
             {film.directors[0] ? ` · ${film.directors.slice(0, 2).join(', ')}` : ''}
@@ -74,6 +90,20 @@ export function QuizCard({ film, reason, onSwipe }: Props) {
             ))}
           </div>
         </div>
+
+        <AnimatePresence>
+          {burst && (
+            <motion.div
+              className="absolute inset-0 flex items-center justify-center pointer-events-none"
+              initial={{ scale: 0.4, opacity: 0 }}
+              animate={{ scale: 1.1, opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ type: 'spring', stiffness: 400, damping: 15 }}
+            >
+              <Star size={110} fill="var(--coral)" color="white" strokeWidth={1.5} />
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         <Stamp opacity={loved} className="left-5 -rotate-12" bg="var(--teal)" label="LOVED" />
         <Stamp opacity={nope} className="right-5 rotate-12" bg="var(--ink-deep)" label="NOPE" />

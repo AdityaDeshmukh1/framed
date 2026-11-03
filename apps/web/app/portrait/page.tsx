@@ -11,7 +11,7 @@
  * to satisfy Next.js static generation requirements.
  */
 
-import { Suspense, useEffect, useState, useCallback } from 'react'
+import { Suspense, useEffect, useState, useCallback, useRef } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useUser } from '@clerk/nextjs'
 import { motion, AnimatePresence } from 'framer-motion'
@@ -26,7 +26,7 @@ import type { ScrapeJob } from '../../lib/types'
 type Phase = 'loading' | 'generating' | 'reveal'
 
 const PIPELINE_STAGES = [
-  { key: 'scraping',  label: 'Scanning Letterboxd',  numeral: 'I',  doneStatuses: ['enriching', 'embedding', 'complete'] },
+  { key: 'scraping',  label: 'Reading your ratings',  numeral: 'I',  doneStatuses: ['enriching', 'embedding', 'complete'] },
   { key: 'enriching', label: 'Enriching metadata',   numeral: 'II', doneStatuses: ['embedding', 'complete'] },
   { key: 'embedding', label: 'Computing embeddings', numeral: 'III',doneStatuses: ['complete'] },
   { key: 'writing',   label: 'Writing your soul',    numeral: 'IV', doneStatuses: [] as string[] },
@@ -79,6 +79,10 @@ function PortraitInner() {
   const [phase, setPhase] = useState<Phase>('loading')
   const [portrait, setPortrait] = useState<string>('')
   const [selectedAccuracy, setSelectedAccuracy] = useState<number | null>(null)
+  // A real job that failed must not fall through to the mock reveal: that
+  // would show a made-up portrait and hide the failure from beta testers.
+  const [failure, setFailure] = useState<string | null>(null)
+  const pollRef = useRef<() => void>(() => {})
 
   // Called once the pipeline job reaches 'complete'.
   const onPipelineComplete = useCallback(async (isMock: boolean) => {
@@ -91,7 +95,8 @@ function PortraitInner() {
       try {
         const data = await generateSoul()
         setPortrait(data.portrait)
-        computeMatches().catch((err) =>
+        // Wait for matches so Discover isn't empty on arrival; non-fatal.
+        await computeMatches().catch((err) =>
           console.warn('[framed:portrait] match computation failed (non-critical):', err)
         )
       } catch (err) {
@@ -137,23 +142,45 @@ function PortraitInner() {
       if (data.status === 'complete') {
         await onPipelineComplete(false)
       } else if (data.status === 'failed') {
-        console.error('[framed:portrait] job failed — falling back to mock')
-        await onPipelineComplete(true)
+        console.error('[framed:portrait] job failed', data)
+        setFailure('We couldn’t build your taste profile. Your ratings are saved, so try again in a moment.')
       } else {
-        setTimeout(pollStatus, 2000)
+        // Quiz jobs finish in about a second; Letterboxd imports take longer.
+        setTimeout(() => pollRef.current(), 1000)
       }
     } catch (err) {
-      console.warn('[framed:portrait] status fetch error (backend down?):', err)
-      // Backend not running — skip straight to mock reveal
-      await onPipelineComplete(true)
+      console.warn('[framed:portrait] status fetch error:', err)
+      setFailure('We can’t reach Framed right now. Check your connection and try again.')
     }
   }, [jobId, onPipelineComplete])
 
   useEffect(() => {
-    pollStatus()
+    pollRef.current = () => void pollStatus()
+    const t = setTimeout(() => pollRef.current(), 0)
+    return () => clearTimeout(t)
   }, [pollStatus])
 
   const progress = stageProgress(job, phase)
+
+  if (failure) {
+    return (
+      <PhoneShell>
+        <StatusBar theme="light" />
+        <div className="flex flex-col flex-1 px-6 pt-10 pb-8 gap-6">
+          <RuleDouble />
+          <h1 className="font-serif italic text-3xl leading-tight" style={{ color: 'var(--ink-deep)' }}>
+            Something went wrong
+          </h1>
+          <p className="font-sans text-sm" style={{ opacity: 0.7 }}>
+            {failure}
+          </p>
+          <div className="mt-auto flex flex-col gap-3">
+            <Button onClick={() => router.push('/onboarding')}>Try again</Button>
+          </div>
+        </div>
+      </PhoneShell>
+    )
+  }
 
   return (
     <PhoneShell>

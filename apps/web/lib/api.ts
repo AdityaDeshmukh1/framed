@@ -44,6 +44,31 @@ export async function startOnboarding(letterboxdHandle: string) {
   return result
 }
 
+/** One quiz answer, on Letterboxd's 0.5–5 scale. */
+export interface QuizRating {
+  tmdb_id: number
+  rating?: number
+  liked?: boolean
+}
+
+/** Start the pipeline from quiz answers instead of a Letterboxd handle. */
+export async function startQuizOnboarding(ratings: QuizRating[]) {
+  log('onboard', `starting pipeline  source=quiz ratings=${ratings.length}`)
+  return apiFetch<{ job_id: string; status: string }>('/api/onboard', {
+    method: 'POST',
+    body: JSON.stringify({ source: 'quiz', ratings }),
+  })
+}
+
+export async function saveBasics(basics: { name: string; age: number; seeking: string[]; city: string }) {
+  const res = await fetch('/api/me/basics', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(basics),
+  })
+  if (!res.ok) throw new Error(`API ${res.status}: ${await res.text().catch(() => '')}`)
+}
+
 export async function fetchJobStatus(jobId: string) {
   return apiFetch<ScrapeJob>(`/api/status/${jobId}`)
 }
