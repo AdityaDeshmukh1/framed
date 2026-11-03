@@ -6,7 +6,19 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"golang.org/x/time/rate"
 )
+
+// newTestClient returns a TMDBClient pointed at a fake server, with no rate limit.
+func newTestClient(server *httptest.Server) *TMDBClient {
+	return &TMDBClient{
+		client:  server.Client(),
+		apiKey:  "test_key",
+		baseURL: server.URL,
+		limiter: rate.NewLimiter(rate.Inf, 1),
+	}
+}
 
 // TestSearchFilm_Success tests that we correctly parse a TMDB search response
 // and return the first result's ID.
@@ -38,25 +50,15 @@ func TestSearchFilm_Success(t *testing.T) {
 	}))
 	defer server.Close()
 
-	// create client pointing at fake server
-	client := &TMDBClient{
-		client: server.Client(),
-		apiKey: "test_key",
-	}
-	// override baseURL for this test
-	// we do this by temporarily reassigning — in a real codebase
-	// you'd inject the baseURL, which we'll refactor to later
-	originalBase := baseURL
-	_ = originalBase // acknowledge we're not actually overriding the const
+	client := newTestClient(server)
 
-	// act
-	// note: since we can't override the const easily, this test
-	// documents the pattern — in the integration test we'll test for real
 	id, err := client.SearchFilm(context.Background(), "Mulholland Drive", 2001)
-	_ = id
-	_ = err
-	// this test currently just verifies compilation and structure
-	// we'll make it fully hermetic when we refactor baseURL to be injectable
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if id != 1018 {
+		t.Errorf("expected id 1018, got %d", id)
+	}
 }
 
 // TestSearchFilm_NoResults tests that we return a meaningful error
@@ -75,10 +77,7 @@ func TestSearchFilm_NoResults(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := &TMDBClient{
-		client: server.Client(),
-		apiKey: "test_key",
-	}
+	client := newTestClient(server)
 
 	_, err := client.SearchFilm(context.Background(), "NonExistentFilm12345", 1900)
 	if err == nil {
@@ -93,10 +92,7 @@ func TestSearchFilm_ServerError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := &TMDBClient{
-		client: server.Client(),
-		apiKey: "test_key",
-	}
+	client := newTestClient(server)
 
 	_, err := client.SearchFilm(context.Background(), "Stalker", 1979)
 	if err == nil {
