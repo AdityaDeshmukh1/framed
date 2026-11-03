@@ -3,6 +3,7 @@ package matching
 import (
 	"context"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 
@@ -58,6 +59,20 @@ func (m *Matcher) FindMatches(ctx context.Context, userID string, limit int) ([]
 
 // ── internal helpers ──────────────────────────────────────────────────────────
 
+// scoreFloor is the cosine similarity treated as "no shared taste". Taste
+// vectors are averages of sentence embeddings, which share a large common
+// component, so even two users with zero films in common score ~0.8 raw.
+// Measured on real profiles: different users ≈ 0.81, same profile = 1.0.
+// Recalibrate once there are more users.
+const scoreFloor = 0.75
+
+// displayScore stretches raw cosine similarity from [scoreFloor, 1] to [0, 1]
+// so match percentages use the whole range. Ordering is unchanged.
+func displayScore(cosine float64) float64 {
+	s := (cosine - scoreFloor) / (1 - scoreFloor)
+	return math.Max(0, math.Min(1, s))
+}
+
 type candidate struct {
 	userID string
 	score  float64
@@ -95,9 +110,11 @@ func (m *Matcher) findCandidates(ctx context.Context, userID, callerVecStr strin
 	for rows.Next() {
 		var c candidate
 		var vecStr string
-		if err := rows.Scan(&c.userID, &c.score, &vecStr); err != nil {
+		var cosine float64
+		if err := rows.Scan(&c.userID, &cosine, &vecStr); err != nil {
 			return nil, err
 		}
+		c.score = displayScore(cosine)
 		c.vec, err = parseVector(vecStr)
 		if err != nil {
 			return nil, err

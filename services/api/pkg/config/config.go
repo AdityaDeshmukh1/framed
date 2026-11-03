@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/joho/godotenv"
 )
@@ -31,6 +32,10 @@ type Config struct {
 	// Auth
 	ClerkSecretKey string
 
+	// Import sources to enable, comma-separated importer.Source values. The
+	// first is the default for onboarding. letterboxd_web needs Chromium.
+	ImportSources []string
+
 	// Scraper behaviour
 	ScraperRequestDelayMS int
 	ScraperMaxConcurrent  int
@@ -53,6 +58,7 @@ func Load() (*Config, error) {
 		AnthropicApiKey: mustGetEnv("ANTHROPIC_API_KEY"),
 		OpenAIApiKey:    mustGetEnv("OPENAI_API_KEY"),
 		MLServiceURL:    getEnv("ML_SERVICE_URL", "http://localhost:8001"),
+		ImportSources:   splitList(getEnv("IMPORT_SOURCES", "letterboxd_rss")),
 		ClerkSecretKey:  mustGetEnv("CLERK_SECRET_KEY"),
 	}
 
@@ -96,4 +102,15 @@ func mustGetEnv(key string) string {
 		panic(fmt.Sprintf("required environment variable %q is not set", key))
 	}
 	return val
+}
+
+// splitList splits a comma-separated value, trimming spaces and dropping empties.
+func splitList(s string) []string {
+	var out []string
+	for _, part := range strings.Split(s, ",") {
+		if part = strings.TrimSpace(part); part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
 }

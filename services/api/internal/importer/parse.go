@@ -1,4 +1,4 @@
-package scraper
+package importer
 
 import (
 	"strconv"

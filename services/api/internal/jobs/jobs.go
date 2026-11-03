@@ -8,11 +8,12 @@ import (
 	"github.com/hibiken/asynq"
 )
 
-func NewScrapeProfileTask(jobID, userID, handle string) (*asynq.Task, error) {
+func NewScrapeProfileTask(jobID, userID, handle, source string) (*asynq.Task, error) {
 	payload := models.ScrapeProfilePayload{
 		JobID:            jobID,
 		UserID:           userID,
 		LetterboxdHandle: handle,
+		Source:           source,
 	}
 
 	bytes, err := json.Marshal(payload)
@@ -20,7 +21,7 @@ func NewScrapeProfileTask(jobID, userID, handle string) (*asynq.Task, error) {
 		return nil, fmt.Errorf("marshal payload: %w", err)
 	}
 
-	return asynq.NewTask(string(models.JobTypeScrapeProfile), bytes), nil
+	return asynq.NewTask(string(models.JobTypeScrapeProfile), bytes, asynq.MaxRetry(3)), nil
 }
 
 func NewComputeVectorTask(userID string) (*asynq.Task, error) {
@@ -33,7 +34,7 @@ func NewComputeVectorTask(userID string) (*asynq.Task, error) {
 		return nil, fmt.Errorf("marshal payload: %w", err)
 	}
 
-	return asynq.NewTask(string(models.JobTypeComputeVector), bytes), nil
+	return asynq.NewTask(string(models.JobTypeComputeVector), bytes, asynq.MaxRetry(3)), nil
 }
 
 func NewEnrichFilmTask(filmID string, tmdbID int, slug, jobID string) (*asynq.Task, error) {
@@ -62,7 +63,9 @@ func NewEmbedFilmTask(filmdId string) (*asynq.Task, error) {
 		return nil, fmt.Errorf("marshal payload: %w", err)
 	}
 
-	return asynq.NewTask(string(models.JobTypeEmbedFilm), bytes), nil
+	// Few retries: if the embedding service is down, fail the job within
+	// minutes rather than retrying for days with the default 25.
+	return asynq.NewTask(string(models.JobTypeEmbedFilm), bytes, asynq.MaxRetry(5)), nil
 }
 
 func NewGenerateBlurbsTask(userID string, candidateIDs []string) (*asynq.Task, error) {

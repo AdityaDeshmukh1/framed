@@ -194,6 +194,8 @@ type ScrapeProfilePayload struct {
 	JobID            string `json:"jobId"`
 	UserID           string `json:"userId"`
 	LetterboxdHandle string `json:"letterboxdHandle"`
+	// Source is the importer.Source to read from; empty means the registry default.
+	Source string `json:"source,omitempty"`
 }
 
 // EnrichFilmPayload is the data passed to the TMDB enrichment worker.

@@ -1,4 +1,4 @@
-package scraper
+package importer
 
 import (
 	"context"
@@ -26,20 +26,26 @@ func InstallBrowser() error {
 	})
 }
 
-// PlaywrightScraper fetches a Letterboxd user's complete film history using
-// a headless Chromium browser to bypass Cloudflare Bot Management.
+// LetterboxdWeb fetches a Letterboxd user's complete film history by loading
+// their /films/ pages in headless Chromium.
+//
+// As of 2026-11 Cloudflare serves an interactive "Verify you are human"
+// challenge from page 2 onwards, so this source only works for profiles with a
+// single page of films. It is disabled by default (see IMPORT_SOURCES).
 //
 // CF session isolation rule: ALL page fetches within one profile scrape must
 // use the same Playwright browser page object. Switching to a raw HTTP client
 // mid-session contaminates the CF session and triggers Turnstile re-challenges.
-type PlaywrightScraper struct{}
+type LetterboxdWeb struct{}
 
-func NewPlaywrightScraper() *PlaywrightScraper { return &PlaywrightScraper{} }
+func NewLetterboxdWeb() *LetterboxdWeb { return &LetterboxdWeb{} }
 
-// ImportProfile scrapes every page of handle's Letterboxd film list and
-// returns one RawRating per film. TMDBMovieID is always 0 — the caller
-// (workers.go) resolves it via TMDB search using the returned Title+Year.
-func (s *PlaywrightScraper) ImportProfile(_ context.Context, handle string) ([]RawRating, error) {
+func (s *LetterboxdWeb) Source() Source { return SourceLetterboxdWeb }
+
+// Import scrapes every page of the user's Letterboxd film list. TMDBMovieID is
+// always 0 — the pipeline resolves it via TMDB search on Title+Year.
+func (s *LetterboxdWeb) Import(_ context.Context, req Request) ([]Film, error) {
+	handle := req.Handle
 	pw, err := playwright.Run()
 	if err != nil {
 		return nil, fmt.Errorf("start playwright: %w", err)
@@ -71,7 +77,7 @@ func (s *PlaywrightScraper) ImportProfile(_ context.Context, handle string) ([]R
 	// Solve the CF challenge by visiting the homepage first.
 	// WaitUntilStateDomcontentloaded fires on the challenge page itself;
 	// .site-header appearing confirms the real Letterboxd site loaded.
-	log.Printf("[scraper] handle=%s establishing CF session...", handle)
+	log.Printf("[import:web] handle=%s establishing CF session...", handle)
 	if _, err = page.Goto("https://letterboxd.com", playwright.PageGotoOptions{
 		WaitUntil: playwright.WaitUntilStateDomcontentloaded,
 		Timeout:   playwright.Float(120000),
@@ -90,7 +96,7 @@ func (s *PlaywrightScraper) ImportProfile(_ context.Context, handle string) ([]R
 	if err != nil {
 		return nil, fmt.Errorf("page 1: %w", err)
 	}
-	log.Printf("[scraper] handle=%s page 1/%d: %d films", handle, totalPages, len(rawFilms))
+	log.Printf("[import:web] handle=%s page 1/%d: %d films", handle, totalPages, len(rawFilms))
 
 	for p := 2; p <= totalPages; p++ {
 		pageURL := fmt.Sprintf("https://letterboxd.com/%s/films/page/%d/", handle, p)
@@ -98,22 +104,21 @@ func (s *PlaywrightScraper) ImportProfile(_ context.Context, handle string) ([]R
 		if err != nil {
 			return nil, fmt.Errorf("page %d: %w", p, err)
 		}
-		log.Printf("[scraper] handle=%s page %d/%d: %d films", handle, p, totalPages, len(films))
+		log.Printf("[import:web] handle=%s page %d/%d: %d films", handle, p, totalPages, len(films))
 		rawFilms = append(rawFilms, films...)
 	}
 
-	log.Printf("[scraper] handle=%s done: %d films across %d pages", handle, len(rawFilms), totalPages)
+	log.Printf("[import:web] handle=%s done: %d films across %d pages", handle, len(rawFilms), totalPages)
 
-	ratings := make([]RawRating, 0, len(rawFilms))
+	ratings := make([]Film, 0, len(rawFilms))
 	for _, f := range rawFilms {
 		title, year := parseItemName(f.itemName)
-		ratings = append(ratings, RawRating{
+		ratings = append(ratings, Film{
 			LetterboxdSlug: f.slug,
 			Title:          title,
 			Year:           year,
 			Rating:         f.rating,
 			Liked:          f.liked,
-			// TMDBMovieID intentionally left 0 — workers resolves it via SearchFilm.
 		})
 	}
 	return ratings, nil
@@ -129,7 +134,12 @@ func scrapePage(page playwright.Page, url string) ([]rawFilm, int, error) {
 	if _, err := page.WaitForSelector(".griditem", playwright.PageWaitForSelectorOptions{
 		Timeout: playwright.Float(20000),
 	}); err != nil {
-		return nil, 0, fmt.Errorf("film grid not found (CF challenge?): %w", err)
+		title, _ := page.Title()
+		shot := "/tmp/framed-scrape-failure.png"
+		if _, serr := page.Screenshot(playwright.PageScreenshotOptions{Path: playwright.String(shot), FullPage: playwright.Bool(true)}); serr != nil {
+			shot = "unavailable"
+		}
+		return nil, 0, fmt.Errorf("film grid not found at %s (title %q, screenshot %s): %w", page.URL(), title, shot, err)
 	}
 
 	content, err := page.Content()

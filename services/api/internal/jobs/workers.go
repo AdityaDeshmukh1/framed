@@ -14,8 +14,8 @@ import (
 	"time"
 
 	"github.com/framed-app/api/internal/enrichment"
+	"github.com/framed-app/api/internal/importer"
 	"github.com/framed-app/api/internal/llm"
-	"github.com/framed-app/api/internal/scraper"
 	"github.com/framed-app/api/pkg/db"
 	"github.com/framed-app/api/pkg/models"
 	"github.com/hibiken/asynq"
@@ -24,7 +24,7 @@ import (
 
 // Workers holds all dependencies the job handlers need.
 type Workers struct {
-	scraper      scraper.ProfileImporter
+	importers    *importer.Registry
 	asynqClient  *asynq.Client
 	enricher     *enrichment.TMDBClient
 	pool         *db.Pool
@@ -35,9 +35,9 @@ type Workers struct {
 	tmdbSem chan struct{}
 }
 
-func NewWorkers(scraper scraper.ProfileImporter, enricher *enrichment.TMDBClient, pool *db.Pool, asynqClient *asynq.Client, anthropicKey, mlServiceURL string) *Workers {
+func NewWorkers(importers *importer.Registry, enricher *enrichment.TMDBClient, pool *db.Pool, asynqClient *asynq.Client, anthropicKey, mlServiceURL string) *Workers {
 	return &Workers{
-		scraper:      scraper,
+		importers:    importers,
 		enricher:     enricher,
 		pool:         pool,
 		asynqClient:  asynqClient,
@@ -84,13 +84,17 @@ func (w *Workers) handleScrapeProfile(ctx context.Context, t *asynq.Task) error 
 		log.Printf("[scrape] job=%s failed to update status to scraping: %v", payload.JobID, err)
 	}
 
-	// scrape letterboxd
-	ratings, err := w.scraper.ImportProfile(ctx, payload.LetterboxdHandle)
+	imp, err := w.importers.Get(importer.Source(payload.Source))
 	if err != nil {
-		return fmt.Errorf("scrape profile: %w", err)
+		// Retrying won't enable a source — fail the job now.
+		return fmt.Errorf("%w: %w", err, asynq.SkipRetry)
+	}
+	ratings, err := imp.Import(ctx, importer.Request{Handle: payload.LetterboxdHandle})
+	if err != nil {
+		return fmt.Errorf("import from %s: %w", imp.Source(), err)
 	}
 
-	log.Printf("[scrape] job=%s scraped %d films in %s", payload.JobID, len(ratings), time.Since(scrapeStart).Round(time.Millisecond))
+	log.Printf("[scrape] job=%s imported %d films from %s in %s", payload.JobID, len(ratings), imp.Source(), time.Since(scrapeStart).Round(time.Millisecond))
 
 	// Update films_found count now that we know the total
 	if _, err := w.pool.Exec(ctx,
@@ -101,7 +105,7 @@ func (w *Workers) handleScrapeProfile(ctx context.Context, t *asynq.Task) error 
 
 	var enqueued, skipped int
 	for _, r := range ratings {
-		// The Playwright scraper returns TMDBMovieID=0; resolve it via TMDB search.
+		// Sources that don't know the TMDB ID leave it 0; resolve it via TMDB search.
 		if r.TMDBMovieID == 0 && r.Title != "" {
 			id, err := w.enricher.SearchFilm(ctx, r.Title, r.Year)
 			if err != nil {
@@ -116,9 +120,11 @@ func (w *Workers) handleScrapeProfile(ctx context.Context, t *asynq.Task) error 
 			continue
 		}
 
-		// extract slug from URL: https://letterboxd.com/user/film/slug/ -> slug
-		parts := strings.Split(strings.TrimSuffix(r.LetterboxdSlug, "/"), "/")
-		slug := parts[len(parts)-1]
+		slug := r.LetterboxdSlug
+		var slugArg *string // NULL when the source doesn't know the slug
+		if slug != "" {
+			slugArg = &slug
+		}
 
 		// Write or Fetch film from the films table
 		var filmID string
@@ -127,7 +133,7 @@ func (w *Workers) handleScrapeProfile(ctx context.Context, t *asynq.Task) error 
 VALUES ($1, $2, $3, $4)
 ON CONFLICT (tmdb_id) DO NOTHING
 RETURNING id`,
-			r.TMDBMovieID, slug, r.Title, r.Year).Scan(&filmID)
+			r.TMDBMovieID, slugArg, r.Title, r.Year).Scan(&filmID)
 
 		if err == pgx.ErrNoRows {
 			err = w.pool.QueryRow(ctx,
@@ -253,8 +259,8 @@ func (w *Workers) handleEnrichFilm(ctx context.Context, t *asynq.Task) error {
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		attempts = attempt + 1
 		filmData, err = w.enricher.GetFilmDetails(ctx, payload.TMDBMovieID)
-		if err == nil {
-			break
+		if err == nil || errors.Is(err, enrichment.ErrNotFound) {
+			break // success, or a permanent miss that retrying can't fix
 		}
 		var rl *enrichment.RateLimitError
 		if errors.As(err, &rl) {
@@ -283,13 +289,14 @@ func (w *Workers) handleEnrichFilm(ctx context.Context, t *asynq.Task) error {
 	elapsed := time.Since(enrichStart).Round(time.Millisecond)
 
 	if err != nil {
-		if strings.Contains(err.Error(), "not found on TMDB") {
+		if errors.Is(err, enrichment.ErrNotFound) {
 			log.Printf("[enrich] job=%s film=%s tmdbID=%d SKIPPED not found on TMDB elapsed=%s",
 				job, payload.FilmID, payload.TMDBMovieID, elapsed)
 			_, _ = w.pool.Exec(ctx,
 				`UPDATE films SET embedding_computed = true WHERE id = $1`,
 				payload.FilmID)
 			w.reportEnrichComplete(job)
+			w.enqueueReadyVectors(ctx, payload.FilmID)
 			return nil
 		}
 		// Network failure after all retries — proceed with partial data so the pipeline isn't blocked.
@@ -348,7 +355,7 @@ func (w *Workers) handleComputeVector(ctx context.Context, t *asynq.Task) error 
 	log.Printf("[vector] computing taste vector for user=%s", payload.UserID)
 
 	rows, err := w.pool.Query(ctx,
-		`SELECT ur.rating, f.embedding::text, f.genres, f.directors
+		`SELECT ur.rating, ur.liked, f.embedding::text, f.genres, f.directors
 		 FROM user_ratings ur
 		 JOIN films f ON f.id = ur.film_id
 		 WHERE ur.user_id = $1 AND f.embedding IS NOT NULL`,
@@ -359,8 +366,7 @@ func (w *Workers) handleComputeVector(ctx context.Context, t *asynq.Task) error 
 	defer rows.Close()
 
 	type entry struct {
-		rating    *float64
-		embedding []float32
+		tasteEntry
 		genres    []string
 		directors []string
 	}
@@ -371,16 +377,21 @@ func (w *Workers) handleComputeVector(ctx context.Context, t *asynq.Task) error 
 
 	for rows.Next() {
 		var rating *float64
+		var liked bool
 		var embStr string
 		var genres, directors []string
-		if err := rows.Scan(&rating, &embStr, &genres, &directors); err != nil {
+		if err := rows.Scan(&rating, &liked, &embStr, &genres, &directors); err != nil {
 			return fmt.Errorf("scan row: %w", err)
 		}
 		emb, err := parseVector(embStr)
 		if err != nil {
 			return fmt.Errorf("parse embedding: %w", err)
 		}
-		entries = append(entries, entry{rating: rating, embedding: emb, genres: genres, directors: directors})
+		entries = append(entries, entry{
+			tasteEntry: tasteEntry{rating: rating, liked: liked, embedding: emb},
+			genres:     genres,
+			directors:  directors,
+		})
 		if rating != nil {
 			ratingSum += *rating
 			ratedCount++
@@ -399,40 +410,22 @@ func (w *Workers) handleComputeVector(ctx context.Context, t *asynq.Task) error 
 		avgRating = ratingSum / float64(ratedCount)
 	}
 
-	dim := len(entries[0].embedding)
-	weights := make([]float64, len(entries))
-	var absWeightSum float64
+	// No centring yet: with only a handful of users the catalogue mean is just
+	// the midpoint between them, which pushes every pair to opposite sides
+	// (measured cos ≈ -0.78 for different users). Matching rescales raw cosine
+	// instead — see matching.displayScore. Revisit with a stable reference mean.
+	tasteEntries := make([]tasteEntry, len(entries))
 	for i, e := range entries {
-		if e.rating != nil {
-			weights[i] = *e.rating - avgRating
-			absWeightSum += math.Abs(weights[i])
-		}
+		tasteEntries[i] = e.tasteEntry
+	}
+	vec := computeTasteVector(tasteEntries, nil)
+	if vec == nil {
+		return fmt.Errorf("taste vector for user=%s has zero length", payload.UserID)
 	}
 
-	result := make([]float64, dim)
-	if absWeightSum == 0 {
-		for _, e := range entries {
-			for j, v := range e.embedding {
-				result[j] += float64(v)
-			}
-		}
-		for j := range result {
-			result[j] /= float64(len(entries))
-		}
-	} else {
-		for i, e := range entries {
-			for j, v := range e.embedding {
-				result[j] += weights[i] * float64(v)
-			}
-		}
-		for j := range result {
-			result[j] /= absWeightSum
-		}
-	}
-
-	parts := make([]string, dim)
-	for i, v := range result {
-		parts[i] = fmt.Sprintf("%g", float32(v))
+	parts := make([]string, len(vec))
+	for i, v := range vec {
+		parts[i] = fmt.Sprintf("%g", v)
 	}
 	vecStr := "[" + strings.Join(parts, ",") + "]"
 
@@ -440,7 +433,7 @@ func (w *Workers) handleComputeVector(ctx context.Context, t *asynq.Task) error 
 	// film contributes a base count and highly-rated films contribute more.
 	genreScores := map[string]float64{}
 	directorScores := map[string]float64{}
-	for i, e := range entries {
+	for _, e := range entries {
 		w := 1.0
 		if e.rating != nil {
 			w += math.Max(0, *e.rating-avgRating)
@@ -451,7 +444,6 @@ func (w *Workers) handleComputeVector(ctx context.Context, t *asynq.Task) error 
 		for _, d := range e.directors {
 			directorScores[d] += w
 		}
-		_ = i
 	}
 	topGenres := topN(genreScores, 5)
 	topDirectors := topN(directorScores, 5)
@@ -664,27 +656,39 @@ func (w *Workers) handleEmbedFilm(ctx context.Context, t *asynq.Task) error {
 
 	log.Printf("[embed] completed film=%s", payload.FilmID)
 
-	// Find all users who rated this film and enqueue ComputeVector for any
-	// whose remaining unembedded films have hit zero.
+	w.enqueueReadyVectors(ctx, payload.FilmID)
+	return nil
+}
+
+// enqueueReadyVectors enqueues ComputeVector for every user who rated filmID
+// and has no films left waiting for an embedding. Call it whenever a film
+// reaches a terminal state — embedded, or skipped as not found on TMDB —
+// otherwise a user whose last pending film was skipped would never finish.
+func (w *Workers) enqueueReadyVectors(ctx context.Context, filmID string) {
 	userRows, err := w.pool.Query(ctx,
 		`SELECT DISTINCT ur.user_id FROM user_ratings ur WHERE ur.film_id = $1 AND ur.user_id IS NOT NULL`,
-		payload.FilmID)
+		filmID)
 	if err != nil {
-		log.Printf("[embed] failed to query users for film=%s err=%v", payload.FilmID, err)
-		return nil
+		log.Printf("[embed] failed to query users for film=%s err=%v", filmID, err)
+		return
 	}
-	defer userRows.Close()
-
+	var userIDs []string
 	for userRows.Next() {
 		var userID string
-		if err := userRows.Scan(&userID); err != nil {
-			continue
+		if err := userRows.Scan(&userID); err == nil {
+			userIDs = append(userIDs, userID)
 		}
+	}
+	userRows.Close()
+
+	for _, userID := range userIDs {
+		// embedding_computed is the terminal flag: true once a film is embedded
+		// or permanently skipped, so skipped films don't block the vector.
 		var pending int
 		if err := w.pool.QueryRow(ctx,
 			`SELECT COUNT(*) FROM user_ratings ur
 			 JOIN films f ON f.id = ur.film_id
-			 WHERE ur.user_id = $1 AND f.tmdb_id != 0 AND f.embedding IS NULL`,
+			 WHERE ur.user_id = $1 AND f.tmdb_id != 0 AND NOT f.embedding_computed`,
 			userID).Scan(&pending); err != nil {
 			log.Printf("[embed] failed to count pending embeddings for user=%s err=%v", userID, err)
 			continue
@@ -701,6 +705,4 @@ func (w *Workers) handleEmbedFilm(ctx context.Context, t *asynq.Task) error {
 			log.Printf("[embed] failed to enqueue vector task for user=%s err=%v", userID, err)
 		}
 	}
-
-	return nil
 }
