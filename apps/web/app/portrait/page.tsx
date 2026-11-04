@@ -73,7 +73,8 @@ function PortraitInner() {
   const searchParams = useSearchParams()
   const jobId = searchParams.get('jobId')
   const { user } = useUser()
-  const displayName = user?.username || user?.firstName || 'You'
+  const [savedName, setSavedName] = useState('')
+  const displayName = savedName || user?.firstName || user?.username || 'You'
 
   const [job, setJob] = useState<ScrapeJob | null>(null)
   const [phase, setPhase] = useState<Phase>('loading')
@@ -95,6 +96,7 @@ function PortraitInner() {
       try {
         const data = await generateSoul()
         setPortrait(data.portrait)
+        if (data.display_name) setSavedName(data.display_name)
         // Wait for matches so Discover isn't empty on arrival; non-fatal.
         await computeMatches().catch((err) =>
           console.warn('[framed:portrait] match computation failed (non-critical):', err)

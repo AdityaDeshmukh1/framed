@@ -75,8 +75,14 @@ func (h *Handlers) Soul(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to store portrait"})
 	}
 
+	// The name from onboarding basics; Clerk test accounts have no name of
+	// their own, so the web app can't rely on Clerk for this.
+	var displayName string
+	_ = h.pool.QueryRow(c.Context(),
+		`SELECT COALESCE(display_name, '') FROM users WHERE id = $1`, userID).Scan(&displayName)
+
 	log.Printf("[soul] completed portrait for user=%s", userID)
-	return c.Status(fiber.StatusOK).JSON(fiber.Map{"portrait": portrait})
+	return c.Status(fiber.StatusOK).JSON(fiber.Map{"portrait": portrait, "display_name": displayName})
 }
 
 // fetchFilmTitles runs a query that returns film titles for a user.

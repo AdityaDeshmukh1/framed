@@ -78,7 +78,7 @@ export async function fetchJobStatus(jobId: string) {
 /** Generate a new soul portrait (calls Claude — takes ~5s). */
 export async function generateSoul() {
   log('soul', `generating portrait`)
-  const result = await apiFetch<{ portrait: string }>('/api/soul', {
+  const result = await apiFetch<{ portrait: string; display_name?: string }>('/api/soul', {
     method: 'POST',
   })
   log('soul', `portrait generated  length=${result.portrait.length}`)
