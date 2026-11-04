@@ -27,6 +27,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -46,6 +47,7 @@ func main() {
 	skipStats := flag.Bool("skip-stats", false, "don't reload film_stats")
 	workers := flag.Int("workers", 6, "concurrent TMDB+embed workers")
 	quizPool := flag.Int("quiz-pool", 400, "how many films to mark as quiz cards (0 = leave as is)")
+	perDecade := flag.Int("per-decade", 250, "also pre-load the N most-rated films of each decade, so recent and older films aren't crowded out by 1990s-2000s MovieLens favourites")
 	flag.Parse()
 
 	ctx := context.Background()
@@ -79,7 +81,14 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	log.Printf("[catalogue] %d films to enrich+embed (top %d by ratings, plus anything below text v%d)", len(targets), *top, embedding.TextVersion)
+	if *perDecade > 0 {
+		extra, err := decadeFilms(ctx, pool, *mlDir, *perDecade)
+		if err != nil {
+			log.Fatal(err)
+		}
+		targets = mergeIDs(targets, extra)
+	}
+	log.Printf("[catalogue] %d films to enrich+embed (top %d by ratings, top %d per decade, plus anything below text v%d)", len(targets), *top, *perDecade, embedding.TextVersion)
 
 	tmdb := enrichment.New(mustEnv("TMDB_API_KEY"))
 	var done, failed atomic.Int64
@@ -262,6 +271,107 @@ func writeStats(ctx context.Context, pool *pgxpool.Pool, stats map[int]*stat, mi
 
 /* ── Catalogue ──────────────────────────────────────────────────────────── */
 
+// readYears maps TMDB id → release year from MovieLens movies.csv titles
+// ("Heat (1995)"). film_stats has no year, and most of these films aren't in
+// `films` yet, so this is the only place to get it before building them.
+func readYears(dir string) (map[int]int, error) {
+	links, err := readLinks(filepath.Join(dir, "links.csv"))
+	if err != nil {
+		return nil, err
+	}
+	f, err := os.Open(filepath.Join(dir, "movies.csv"))
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	r := csv.NewReader(f)
+	if _, err := r.Read(); err != nil {
+		return nil, err
+	}
+	years := map[int]int{}
+	for {
+		rec, err := r.Read()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		movie, err := strconv.Atoi(rec[0])
+		if err != nil {
+			continue
+		}
+		title := strings.TrimSpace(rec[1])
+		if len(title) < 6 || title[len(title)-1] != ')' || title[len(title)-6] != '(' {
+			continue
+		}
+		year, err := strconv.Atoi(title[len(title)-5 : len(title)-1])
+		if tmdb, ok := links[movie]; ok && err == nil {
+			years[tmdb] = year
+		}
+	}
+	return years, nil
+}
+
+// decadeFilms returns the perDecade most-rated films of every decade that
+// aren't built yet. Ranking by count overall gives ~75% 1990s-2000s films,
+// because that's when MovieLens users were most active.
+func decadeFilms(ctx context.Context, pool *pgxpool.Pool, dir string, perDecade int) ([]int, error) {
+	years, err := readYears(dir)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := pool.Query(ctx, `
+		SELECT s.tmdb_id, s.rating_count FROM film_stats s
+		LEFT JOIN films f ON f.tmdb_id = s.tmdb_id
+		WHERE s.rating_count >= 300
+		  AND (f.id IS NULL OR f.embedding IS NULL OR f.embedding_version < $1)
+		ORDER BY s.rating_count DESC`, embedding.TextVersion)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	taken := map[int]int{}
+	var ids []int
+	for rows.Next() {
+		var id, n int
+		if err := rows.Scan(&id, &n); err != nil {
+			return nil, err
+		}
+		y, ok := years[id]
+		if !ok {
+			continue
+		}
+		if d := decade(y); taken[d] < perDecade {
+			taken[d]++
+			ids = append(ids, id)
+		}
+	}
+	return ids, rows.Err()
+}
+
+// decade buckets everything before 1960 together: there are too few
+// well-known films per decade to fill a quota on their own.
+func decade(year int) int {
+	if year < 1960 {
+		return 1950
+	}
+	return year / 10 * 10
+}
+
+func mergeIDs(a, b []int) []int {
+	seen := map[int]bool{}
+	var out []int
+	for _, id := range append(a, b...) {
+		if !seen[id] {
+			seen[id] = true
+			out = append(out, id)
+		}
+	}
+	sort.Ints(out)
+	return out
+}
+
 // pendingFilms returns TMDB ids for the top-N films by rating count that are
 // missing or stale, plus every existing film below the current text version.
 func pendingFilms(ctx context.Context, pool *pgxpool.Pool, top int) ([]int, error) {
@@ -318,12 +428,136 @@ func buildFilm(ctx context.Context, pool *pgxpool.Pool, tmdb *enrichment.TMDBCli
 	return err
 }
 
-// markQuizPool picks the quiz cards: a few of the most-rated films as
-// warm-ups (people like recognising things), then the films that best split
-// opinion among those widely seen: rating spread × log(rating count). A film
-// everyone loves tells us little about you; one people disagree on tells a lot.
+// Share of quiz cards per decade (decade() buckets pre-1960 together). Skews
+// a little recent, because that's what new users have seen; the pool used to
+// be 75% 1990s-2000s.
+var decadeShare = map[int]float64{
+	1950: 0.07, 1960: 0.06, 1970: 0.08, 1980: 0.12,
+	1990: 0.16, 2000: 0.19, 2010: 0.23, 2020: 0.09,
+}
+
+const (
+	// No genre may appear on more than this share of cards (a film counts
+	// toward each of its genres). Action/Comedy/Adventure were ~37% each.
+	maxGenreShare = 0.28
+	// At least this share of each decade's cards are non-English.
+	minForeignShare = 0.15
+	// One card in this many is a well-known warm-up, picked by rating count.
+	warmupEvery = 7
+)
+
+type candidate struct {
+	id      string
+	decade  int
+	english bool
+	genres  []string
+	count   int
+	info    float64 // rating spread × ln(count): divisive and widely seen
+}
+
+// markQuizPool picks the quiz cards. Per decade: a few of the most-rated films
+// as warm-ups (people like recognising things), then the films that best split
+// opinion among those widely seen, rating spread × log(rating count): a film
+// everyone loves tells us little about you; one people disagree on tells a
+// lot. Genre caps and a non-English minimum keep the mix varied.
 func markQuizPool(ctx context.Context, pool *pgxpool.Pool, size int) (int64, error) {
-	warmups := size / 7
+	rows, err := pool.Query(ctx, `
+		SELECT f.id::text, f.year, COALESCE(f.language, ''), f.genres, s.rating_count, s.rating_std
+		FROM films f JOIN film_stats s ON s.tmdb_id = f.tmdb_id
+		WHERE f.embedding_version >= $1 AND f.embedding IS NOT NULL
+		  AND f.poster_path IS NOT NULL AND f.synopsis <> '' AND s.rating_count >= 300`,
+		embedding.TextVersion)
+	if err != nil {
+		return 0, err
+	}
+	byDecade := map[int][]candidate{}
+	for rows.Next() {
+		var c candidate
+		var year int
+		var lang string
+		var std float64
+		if err := rows.Scan(&c.id, &year, &lang, &c.genres, &c.count, &std); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		c.decade, c.english = decade(year), lang == "en"
+		c.info = std * math.Log(float64(c.count))
+		byDecade[c.decade] = append(byDecade[c.decade], c)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+
+	picked := map[string]bool{}
+	genreCount := map[string]int{}
+	genreCap := int(maxGenreShare * float64(size))
+	take := func(c candidate, capGenres bool) bool {
+		if picked[c.id] {
+			return false
+		}
+		if capGenres {
+			for _, g := range c.genres {
+				if genreCount[g] >= genreCap {
+					return false
+				}
+			}
+		}
+		picked[c.id] = true
+		for _, g := range c.genres {
+			genreCount[g]++
+		}
+		return true
+	}
+	// fill takes up to n films from cs (already sorted), returning how many.
+	fill := func(cs []candidate, n int, keep func(candidate) bool, capGenres bool) int {
+		got := 0
+		for _, c := range cs {
+			if got >= n {
+				break
+			}
+			if keep(c) && take(c, capGenres) {
+				got++
+			}
+		}
+		return got
+	}
+	anyFilm := func(candidate) bool { return true }
+
+	decades := make([]int, 0, len(decadeShare))
+	for d := range decadeShare {
+		decades = append(decades, d)
+	}
+	sort.Ints(decades)
+	for _, d := range decades {
+		quota := int(math.Round(decadeShare[d] * float64(size)))
+		cs := byDecade[d]
+		byCount := append([]candidate(nil), cs...)
+		sort.Slice(byCount, func(i, j int) bool { return byCount[i].count > byCount[j].count })
+		sort.Slice(cs, func(i, j int) bool { return cs[i].info > cs[j].info })
+
+		got := fill(byCount, quota/warmupEvery, anyFilm, true)
+		foreign := int(math.Ceil(minForeignShare * float64(quota)))
+		got += fill(cs, foreign, func(c candidate) bool { return !c.english }, true)
+		got += fill(cs, quota-got, anyFilm, true)
+		log.Printf("[catalogue] quiz pool %ds: %d/%d (%d candidates)", d, got, quota, len(cs))
+	}
+	// Decades that ran short (or rounding) are topped up from anywhere.
+	if remaining := size - len(picked); remaining > 0 {
+		var all []candidate
+		for _, cs := range byDecade {
+			all = append(all, cs...)
+		}
+		sort.Slice(all, func(i, j int) bool { return all[i].info > all[j].info })
+		if n := fill(all, remaining, anyFilm, true); n < remaining {
+			fill(all, remaining-n, anyFilm, false)
+		}
+	}
+
+	ids := make([]string, 0, len(picked))
+	for id := range picked {
+		ids = append(ids, id)
+	}
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		return 0, err
@@ -332,21 +566,7 @@ func markQuizPool(ctx context.Context, pool *pgxpool.Pool, size int) (int64, err
 	if _, err := tx.Exec(ctx, `UPDATE films SET in_quiz_pool = false WHERE in_quiz_pool`); err != nil {
 		return 0, err
 	}
-	tag, err := tx.Exec(ctx, `
-		WITH ranked AS (
-			SELECT f.id, s.rating_std * ln(s.rating_count) AS info,
-			       row_number() OVER (ORDER BY s.rating_count DESC) AS pop_rank
-			FROM films f JOIN film_stats s ON s.tmdb_id = f.tmdb_id
-			WHERE f.embedding_version >= $3 AND f.embedding IS NOT NULL
-			  AND f.poster_path IS NOT NULL AND f.synopsis <> ''
-		),
-		pick AS (
-			SELECT id FROM ranked WHERE pop_rank <= $1
-			UNION
-			(SELECT id FROM ranked WHERE pop_rank > $1 AND pop_rank <= 1500 ORDER BY info DESC LIMIT $2)
-		)
-		UPDATE films SET in_quiz_pool = true WHERE id IN (SELECT id FROM pick)`,
-		warmups, size-warmups, embedding.TextVersion)
+	tag, err := tx.Exec(ctx, `UPDATE films SET in_quiz_pool = true WHERE id = ANY($1::uuid[])`, ids)
 	if err != nil {
 		return 0, err
 	}
