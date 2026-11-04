@@ -9,7 +9,7 @@
 import { useRef, useState } from 'react'
 import { AnimatePresence, motion, useMotionValue, useTransform, type MotionValue } from 'framer-motion'
 import { Star } from 'lucide-react'
-import { posterUrl, type PoolFilm } from '../../lib/quiz/engine'
+import { POSTER_SIZES, posterSrcSet, posterUrl, type PoolFilm } from '../../lib/quiz/engine'
 
 const SWIPE = 110
 
@@ -60,13 +60,15 @@ export function QuizCard({ film, reason, onSwipe, onFavourite }: Props) {
         {/* eslint-disable-next-line @next/next/no-img-element -- mock: TMDB CDN directly */}
         <img
           src={posterUrl(film.posterPath)}
-          alt=""
+          srcSet={posterSrcSet(film.posterPath)}
+          sizes={POSTER_SIZES}
+          alt={film.title}
           draggable={false}
           className="absolute inset-0 w-full h-full object-cover pointer-events-none"
         />
         <div
           className="absolute inset-0 pointer-events-none"
-          style={{ background: 'linear-gradient(to bottom, rgba(26,24,23,0.55) 0%, transparent 22%, transparent 45%, rgba(26,24,23,0.95) 100%)' }}
+          style={{ background: 'linear-gradient(to bottom, transparent 62%, rgba(26,24,23,0.9) 100%)' }}
         />
 
         {/* Why this film */}
@@ -76,9 +78,9 @@ export function QuizCard({ film, reason, onSwipe, onFavourite }: Props) {
           </p>
         </div>
 
-        <div className="absolute bottom-0 inset-x-0 p-5 flex flex-col gap-1.5" style={{ color: 'var(--cream)' }}>
-          <h2 className="font-serif italic text-3xl leading-[1.05] font-semibold">{film.title}</h2>
-          <p className="font-sans text-sm opacity-80">
+        <div className="absolute bottom-0 inset-x-0 px-4 pb-4 flex flex-col gap-1" style={{ color: 'var(--cream)' }}>
+          <h2 className="font-serif italic text-xl leading-tight font-semibold">{film.title}</h2>
+          <p className="font-sans text-xs opacity-80">
             {film.year}
             {film.directors[0] ? ` · ${film.directors.slice(0, 2).join(', ')}` : ''}
           </p>

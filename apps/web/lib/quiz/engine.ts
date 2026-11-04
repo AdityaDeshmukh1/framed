@@ -91,8 +91,11 @@ export const LANGUAGE_NAMES: Record<string, string> = {
   zh: 'Chinese', cn: 'Cantonese', pt: 'Portuguese', sv: 'Swedish', da: 'Danish', fa: 'Persian',
 }
 
-export const posterUrl = (path: string, size: 'w185' | 'w342' | 'w500' = 'w500') =>
-  `https://image.tmdb.org/t/p/${size}${path}`
+export type PosterSize = 'w185' | 'w342' | 'w500' | 'w780'
+export const posterUrl = (path: string, size: PosterSize = 'w500') => `https://image.tmdb.org/t/p/${size}${path}`
+/** srcSet for a full-size card: w500 on standard screens, w780 on high-density ones. */
+export const posterSrcSet = (path: string) => `${posterUrl(path, 'w500')} 500w, ${posterUrl(path, 'w780')} 780w`
+export const POSTER_SIZES = '(max-width: 480px) 92vw, 420px'
 
 /* ── State ───────────────────────────────────────────────────────────────── */
 

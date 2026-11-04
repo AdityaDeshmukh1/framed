@@ -39,6 +39,8 @@ import {
   fitModel,
   genreAffinity,
   isDone,
+  POSTER_SIZES,
+  posterSrcSet,
   posterUrl,
   ratedCount,
   toSubmission,
@@ -227,7 +229,10 @@ function Rate({
         </div>
       </div>
 
-      <div className="relative flex-1 min-h-0">
+      {/* Always poster-shaped (2:3) and as large as the space allows: stretching
+          the card to fill the space made object-cover crop the posters. */}
+      <div className="relative flex-1 min-h-0 flex items-center justify-center" style={{ containerType: 'size' }}>
+        <div className="relative" style={{ width: 'min(100cqw, calc(100cqh * 2 / 3))', aspectRatio: '2 / 3' }}>
         <AnimatePresence>
           {current && (
             <motion.div
@@ -247,11 +252,12 @@ function Rate({
             </motion.div>
           )}
         </AnimatePresence>
+        </div>
         {/* Preload the likely next posters so cards never wait on the network. */}
         <div className="hidden" aria-hidden>
           {model.predictions.slice(1, 5).map((p) => (
             // eslint-disable-next-line @next/next/no-img-element
-            <img key={p.film.tmdbId} src={posterUrl(p.film.posterPath)} alt="" />
+            <img key={p.film.tmdbId} src={posterUrl(p.film.posterPath)} srcSet={posterSrcSet(p.film.posterPath)} sizes={POSTER_SIZES} alt="" />
           ))}
         </div>
       </div>
