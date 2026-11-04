@@ -9,6 +9,7 @@
  * reaction we can least predict:
  *
  *   score = P(seen) × (uncertainty + bonus for a language not yet asked)
+ *           × variety (penalises films like the last few cards)
  *
  * uncertainty mixes raw model variance (what we haven't asked about) with how
  * close P(like) is to a coin-flip (depends on what you liked/disliked).
@@ -154,7 +155,20 @@ const NOVEL_MIN_FILMS = 8
  * but feels deaf: love one Hindi film and it never shows another. This keeps
  * following your likes, to tell apart *which* ones you love.
  */
-const LIKE_BONUS = 0.35
+const LIKE_BONUS = 0.15
+/**
+ * Variety. Order barely changes how accurate the profile ends up (simulated on
+ * real MovieLens users), so we're free to optimise for a quiz that doesn't
+ * feel samey. A card is penalised for resembling the last few cards, and
+ * more so for sharing their main genre or decade.
+ */
+const RECENT = 4
+const SIMILAR_PENALTY = 0.8 // × max(0, similarity to a recent card)
+const GENRE_FATIGUE = 0.6 // × per recent card with the same main genre
+const DECADE_FATIGUE = 0.9 // × per recent card from the same decade
+/** Follow-ups ("you loved X, does this land too?"): at most this many, spaced out. */
+const MAX_FOLLOW_UPS = 2
+const FOLLOW_UP_GAP = 3
 
 const sim = (a: Float64Array, b: Float64Array) => {
   let d = 0
@@ -236,6 +250,10 @@ export function fitModel(pool: Pool, s: QuizState): Model {
     ...s.responses.map((r) => ({ film: pool.byId.get(r.id), seen: r.answer === 'unseen' ? 0 : 1 })),
   ].filter((x): x is { film: PoolFilm; seen: number } => !!x.film)
   const shownLanguages = new Set(shown.map((x) => x.film.language))
+  const recent = s.responses
+    .slice(-RECENT)
+    .map((r) => pool.byId.get(r.id))
+    .filter((f): f is PoolFilm => !!f)
 
   let varSum = 0
   let varWeight = 0
@@ -273,7 +291,17 @@ export function fitModel(pool: Pool, s: QuizState): Model {
     const uncertainty = (1 - SPREAD_WEIGHT) * coinFlip + SPREAD_WEIGHT * spread
     const novel = shownLanguages.has(film.language) || !pool.bigLanguages.has(film.language) ? 0 : NOVEL_LANGUAGE
     const likeBonus = n > 0 ? LIKE_BONUS * pLike : 0
-    const score = pSeen * (uncertainty + novel + likeBonus) * film.divisive
+    let closest = 0
+    let sameGenre = 0
+    let sameDecade = 0
+    for (const r of recent) {
+      closest = Math.max(closest, sim(film.centred, r.centred))
+      if (r.genres[0] && r.genres[0] === film.genres[0]) sameGenre++
+      if (Math.floor(r.year / 10) === Math.floor(film.year / 10)) sameDecade++
+    }
+    const variety =
+      Math.max(0.05, 1 - SIMILAR_PENALTY * closest) * GENRE_FATIGUE ** sameGenre * DECADE_FATIGUE ** sameDecade
+    const score = pSeen * (uncertainty + novel + likeBonus) * film.divisive * variety
     predictions.push({ film, mean, variance, pLike, pSeen, uncertainty, novel, score })
   }
   predictions.sort((a, b) => b.score - a.score)
@@ -284,7 +312,10 @@ export function fitModel(pool: Pool, s: QuizState): Model {
   const last = s.responses.at(-1)
   const lastFilm = last && pool.byId.get(last.id)
   const strong = last && (last.answer === 'loved' || last.answer === 'favourite' || last.answer === 'nope')
-  if (last && lastFilm && strong && !last.followUp) {
+  const followUps = s.responses.filter((r) => r.followUp).length
+  const lastFollowUp = s.responses.findLastIndex((r) => r.followUp)
+  const spaced = lastFollowUp < 0 || s.responses.length - lastFollowUp > FOLLOW_UP_GAP
+  if (last && lastFilm && strong && !last.followUp && followUps < MAX_FOLLOW_UPS && spaced) {
     let best = -1
     let bestScore = -Infinity
     predictions.forEach((p, i) => {
